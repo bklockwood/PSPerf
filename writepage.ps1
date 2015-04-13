@@ -66,7 +66,7 @@ function Write-SparkyPageHeader
             }
 
             varcpu {
-                color: red;
+                color: Brown;
             }
 
             varmem {
@@ -214,7 +214,7 @@ function Write-SparkyPageFooter
                 width: 150,
                 height: 65,
                 padding: 10,
-                line_stroke: "red",
+                line_stroke: "Brown",
                 line_stroke_width: 1,
                 dot_radius: function(d, i) {
                     return this.last ? 5 : 0;
@@ -222,7 +222,7 @@ function Write-SparkyPageFooter
                 range_min: "1",
                 range_max: "40",
                 range_fill: "LightGray",
-                dot_fill: "red",
+                dot_fill: "Red",
                 dot_stroke: "white",
                 dot_stroke_width: 1
             });
