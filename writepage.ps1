@@ -129,7 +129,6 @@ function Write-SparkyPageHeader
                 layout: auto;
                 font-size:20px;
                 color:#333333;
-                width:100%;
                 border-width: 1px;
                 border-color: #a9a9a9;
                 border-collapse: collapse;
@@ -158,6 +157,11 @@ function Write-SparkyPageHeader
     </head>
     <body>
     <table class="tftable" border="1">
+        <th></th>
+        <th>cpu</th>
+        <th>mem</th>
+        <th>disk</th>
+        <th>net</th>
 "@
 
         out-file -InputObject $PageHead -FilePath $FilePath -Encoding unicode -Force
@@ -378,30 +382,30 @@ function Write-SparkyPageLine
     Process
     {
         [string]$Line = "`t<tr>`r`n"
-        [string]$Line += "`t<td>$LineName `r`n"
+        [string]$Line += "`t<td>$LineName </td>`r`n"
 
-        [string]$Line += "`t <span class=""sparkline"" `r`n" 
+        [string]$Line += "`t<td> <span class=""sparkline"" `r`n" 
         [string]$Line += "`tdata-preset=""cpu"" `r`n"
-        [string]$Line += "`tdata-points = ""$cpu"" >`r`n "        
-        [string]$Line += "`t</span> `r`n"
-        [string]$Line += "`t12 `r`n" #<---not <var>
+        [string]$Line += "`tdata-points = ""$cpu"" >`r`n " 
+        [string]$Line += "`t<varcpu>12</varcpu> `r`n"       
+        [string]$Line += "`t</span> `r`n" 
         [string]$Line += "`r`n"
 
-        [string]$Line += "`t <span class=""sparkline"" `r`n" 
+        [string]$Line += "`t<td> <span class=""sparkline"" `r`n" 
         [string]$Line += "`tdata-preset=""mem"" `r`n"
         [string]$Line += "`tdata-points = ""$mem"" > `r`n"
         [string]$Line += "`t<varmem>12</varmem> `r`n"
-        [string]$Line += "`t</span> `r`n"
+        [string]$Line += "`t</span> </td>`r`n"
         [string]$Line += "`r`n"
 
-        [string]$Line += "`t <span class=""sparkline"" `r`n"
+        [string]$Line += "`t<td> <span class=""sparkline"" `r`n"
         [string]$Line += "`tdata-preset=""disk"" `r`n"
         [string]$Line += "`tdata-points = ""$disk"" > `r`n"
         [string]$Line += "`t<vardisk>12</vardisk> `r`n"
-        [string]$Line += "`t</span> `r`n"
+        [string]$Line += "`t</span> </td>`r`n"
         [string]$Line += "`r`n"
 
-        [string]$Line += "`t <span class=""sparkline"" `r`n"       
+        [string]$Line += "`t<td> <span class=""sparkline"" `r`n"       
         [string]$Line += "`tdata-preset=""net"" `r`n"
         [string]$Line += "`tdata-points = ""$net"" > `r`n"
         [string]$Line += "`t<varnet>12</varnet> `r`n"
@@ -420,6 +424,11 @@ $mem = Get-RandomArray -ArrayLength 144
 $disk = Get-RandomArray -ArrayLength 144
 $net = Get-RandomArray -ArrayLength 144
 Write-SparkyPageLine -LineName "Server1" -cpu $cpu -mem $mem -disk $disk -net $net -FilePath $FilePath
+$cpu = Get-RandomArray -ArrayLength 144
+$mem = Get-RandomArray -ArrayLength 144
+$disk = Get-RandomArray -ArrayLength 144
+$net = Get-RandomArray -ArrayLength 144
+Write-SparkyPageLine -LineName "Server2" -cpu $cpu -mem $mem -disk $disk -net $net -FilePath $FilePath
 Write-SparkyPageFooter $FilePath
 
 
