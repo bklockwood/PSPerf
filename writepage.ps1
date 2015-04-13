@@ -339,6 +339,8 @@ function Write-SparkyPageFooter
                 dot_radius: function(d, i) {
                     return this.last ? 5 : 0;
                 },
+                range_min: "1",
+                range_max: "40",
                 range_fill: "LightGray",
                 dot_fill: "red",
                 dot_stroke: "white",
@@ -355,6 +357,8 @@ function Write-SparkyPageFooter
                 dot_radius: function(d, i) {
                     return this.last ? 5 : 0;
                 },
+                range_min: "1",
+                range_max: "40",
                 range_fill: "LightGray",
                 dot_fill: "red",
                 dot_stroke: "white",
@@ -371,6 +375,8 @@ function Write-SparkyPageFooter
                 dot_radius: function(d, i) {
                     return this.last ? 5 : 0;
                 },
+                range_min: "1",
+                range_max: "40",
                 range_fill: "LightGray",
                 dot_fill: "red",
                 dot_stroke: "white",
@@ -387,6 +393,8 @@ function Write-SparkyPageFooter
                 dot_radius: function(d, i) {
                     return this.last ? 5 : 0;
                 },
+                range_min: "1",
+                range_max: "40",
                 range_fill: "LightGray",
                 dot_fill: "red",
                 dot_stroke: "white",
@@ -536,10 +544,7 @@ function Write-SparkyPageLine
         [string]$Line += "`t<td>$LineName `r`n"
 
         [string]$Line += "`t <span class=""sparkline"" `r`n" 
-        [string]$Line += "`tdata-range_min=""16"" `r`n"
-        [string]$Line += "`tdata-range_max=""75"" `r`n"
         [string]$Line += "`tdata-preset=""cpu"" `r`n"
-        [string]$Line += "`tdata-preset=""hilite-last""  `r`n"
         [string]$Line += "`tdata-points = ""$cpu"" >`r`n "
 
         
@@ -548,30 +553,21 @@ function Write-SparkyPageLine
         [string]$Line += "`r`n"
 
         [string]$Line += "`t <span class=""sparkline"" `r`n" 
-        [string]$Line += "`tdata-range_min=""16"" `r`n"
-        [string]$Line += "`tdata-range_max=""75"" `r`n"
         [string]$Line += "`tdata-preset=""mem"" `r`n"
-        [string]$Line += "`tdata-preset=""hilite-last"" `r`n"
         [string]$Line += "`tdata-points = ""$mem"" > `r`n"
         [string]$Line += "`t<varmem>12</varmem> `r`n"
         [string]$Line += "`t</span> `r`n"
         [string]$Line += "`r`n"
 
         [string]$Line += "`t <span class=""sparkline"" `r`n"
-        [string]$Line += "`tdata-range_min=""16"" `r`n"
-        [string]$Line += "`tdata-range_max=""75"" `r`n" 
         [string]$Line += "`tdata-preset=""disk"" `r`n"
-        [string]$Line += "`tdata-preset=""hilite-last"" `r`n"
         [string]$Line += "`tdata-points = ""$disk"" > `r`n"
         [string]$Line += "`t<vardisk>12</vardisk> `r`n"
         [string]$Line += "`t</span> `r`n"
         [string]$Line += "`r`n"
 
-        [string]$Line += "`t <span class=""sparkline"" `r`n"
-        [string]$Line += "`tdata-range_min=""16"" `r`n"
-        [string]$Line += "`tdata-range_max=""75"" `r`n"        
+        [string]$Line += "`t <span class=""sparkline"" `r`n"       
         [string]$Line += "`tdata-preset=""net"" `r`n"
-        [string]$Line += "`tdata-preset=""hilite-last"" `r`n"
         [string]$Line += "`tdata-points = ""$net"" > `r`n"
         [string]$Line += "`t<varnet>12</varnet> `r`n"
         [string]$Line += "`t</span></td> `r`n"
