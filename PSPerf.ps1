@@ -53,16 +53,18 @@ function Get-PerfData #queries a single computer for performance data
         $perfcounters= '\System\Processor Queue Length', 
             '\Memory\Pages Input/Sec', 
             '\PhysicalDisk(*)\Avg. Disk Queue Length'
+        foreach ($comp in $ComputerName) {
         $perfdata = get-counter -ComputerName $computername -counter $perfcounters
-        foreach ($item in $perfdata.CounterSamples) {
-            if ($item.path -like "*Processor*") {$datahash.Add("CpuQueue",$item.cookedvalue)}
-            if ($item.path -like "*Pages*") {$datahash.Add("PagesPerSec", $item.cookedvalue)}
-            if ($item.path -like "*Physicaldisk*") {
-                $dqhash.Add($item.InstanceName, $item.CookedValue)
+            foreach ($item in $perfdata.CounterSamples) {
+                if ($item.path -like "*Processor*") {$datahash.Add("CpuQueue",$item.cookedvalue)}
+                if ($item.path -like "*Pages*") {$datahash.Add("PagesPerSec", $item.cookedvalue)}
+                if ($item.path -like "*Physicaldisk*") {
+                    $dqhash.Add($item.InstanceName, $item.CookedValue)
+                }
             }
+            $datahash.Add("DiskQueues", $dqhash)
+            $datahash
         }
-        $datahash.Add("DiskQueues", $dqhash)
-        $datahash
     }
     End{}
 }
@@ -161,16 +163,24 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
         foreach ($key in $DataStore.Keys) {
             if ($DataStore.$key.GetType() -eq [System.Collections.Hashtable] ) {
                 $Computername = $key
-            } else {
-                write-host $key $datastore.$key
-            }
+            } 
             foreach ($subkey in $DataStore.$key.Keys) {
                 if ($DataStore.$key.$subkey.GetType() -eq [System.Collections.Hashtable]) {
                     foreach ($subsubkey in $DataStore.$key.$subkey.Keys) {
-                        if ($subsubkey -like "0*") {$disk1 = $DataStore.$key.$subkey.$subsubkey}
+                        #if array has > 144 elements, shrink to 144 (removing first, oldest elements)
+                        while ($DataStore.$key.$subkey.$subsubkey.Count -gt 144) {
+                                $DataStore.$key.$subkey.$subsubkey.RemoveAt(0)
+                            }
+                        if ($subsubkey -like "0*") {
+                            $disk1 = $DataStore.$key.$subkey.$subsubkey
+                            }
                         if ($subsubkey -like "1*") {$disk2 = $DataStore.$key.$subkey.$subsubkey}
                     } 
                 } else {
+                    #if array has > 144 elements, shrink to 144 (removing first, oldest elements)
+                    while ($DataStore.$key.$subkey.Count -gt 144) {
+                            $DataStore.$key.$subkey.RemoveAt(0)
+                        }
                     if ($subkey -eq "CpuQueue") {$cpu = $DataStore.$key.$subkey}
                     if ($subkey -eq "PagesPerSec") {$mem = $DataStore.$key.$subkey}
                 }
@@ -217,6 +227,7 @@ function Output-Pageheader  #creates Page Header string
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" 
    "http://www.w3.org/TR/html4/strict.dtd">
 <head>
+    <meta http-equiv="refresh" content="5">    
 	<style type="text/css">
 	    body {
 		    font:  16px Courier New, monospace;
@@ -308,19 +319,22 @@ function Output-PageFooter #creates Page Footer string
 }
 
 ## ---------------------------------------Script starts here---------------------------------
-$datastore = "C:\Users\Bryan\Documents\WindowsPowerShell\PSPerf\datastore.clixml"
+$psperfdir = "C:\Users\bryanda"
+$datastore = "$psperfdir\datastore.clixml"
 if (!$StorageHash) {
-    if (get-item $datastore) {
+    if (get-item $datastore -ErrorAction ignore) {
         $StorageHash = Import-Clixml -Path $datastore
     } else {
     $StorageHash = @{}
     }
 }
-$computername = 's1'
-$pdata = Get-PerfData $computername
-add-perfdata -StorageHash $StorageHash -Computername $computername -PerfData $pdata
+$computername = 's2', 's3', 'hyper1', 'hyper2', 'ad6', 'ad5', 'fs5'
+foreach ($comp in $computername) {
+    $pdata = Get-PerfData $comp
+    add-perfdata -StorageHash $StorageHash -Computername $comp -PerfData $pdata
+}
 Export-Clixml -InputObject $StorageHash -Path $datastore
-$htmlfile = "C:\Users\Bryan\Documents\WindowsPowerShell\PSPerf\PSPerf.html"
+$htmlfile = "$psperfdir\PSPerf.html"
 $htmlstring = Output-Pageheader
 $htmlstring += Output-CurrentPerfTable -DataStore $StorageHash
 $htmlstring += Output-PageFooter
@@ -328,7 +342,6 @@ out-file -InputObject $htmlstring -FilePath $htmlfile -Encoding UTF8 -Force
 
 <# 
 Next steps:
- Store the table/object on disk with export-clixml
+
  Trim each array to latest 144 items
- Iterate storagehash and create comma-separated text strings to write to page
 #> 
