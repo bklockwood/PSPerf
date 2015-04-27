@@ -142,22 +142,19 @@ function Add-PerfData #Adds get-perfdata output to hashtable of previously colle
    Example of how to use this cmdlet
 
 #>
-function Write-CurrentPerfTable
+function Output-CurrentPerfTable  #builds the [string] table of performance data
 {
     [CmdletBinding()]
     [OutputType([string])]
     Param
     (
         [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
-        [Alias("InputObject")][hashtable]$DataStore,        
-        [Parameter(Mandatory=$false, ValueFromPipeline=$true, Position=1)]
-        [Alias("OutputFile")][string]$Path
+        [Alias("InputObject")][hashtable]$DataStore
     )
 
     Begin{}
     Process {
-        [string]$Output = "<hr>`r`n"
-        $Output += "<table class=""gridtable"">`r`n"
+        [string]$Output = "<table class=""gridtable"">`r`n"
         $Output += "<tr><th></th><th>cpu</th><th>mem</th><th>disk1</th><th>disk2</th></tr>`r`n"
         
         #start walking down the object. this should be recursive but I am lazy
@@ -191,6 +188,125 @@ function Write-CurrentPerfTable
     End{}
 }
 
+<#
+.Synopsis
+   Writes page header
+.DESCRIPTION
+   Long description
+.PARAMETER Param1
+Help for Param1
+.EXAMPLE
+   Example of how to use this cmdlet
+.EXAMPLE
+   Another example of how to use this cmdlet
+#>
+function Output-Pageheader  #creates Page Header string
+{
+    [CmdletBinding()]
+    [OutputType([string])]
+    Param
+    (
+        #[Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("p1")][string]$Param1,        
+        #[Parameter(Mandatory=$true, ValueFromPipelineByPropertyName=$true, Position=1)][int]$Param2
+    )
+
+    Begin{}
+
+    Process {
+        [string]$Output = @'
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" 
+   "http://www.w3.org/TR/html4/strict.dtd">
+<head>
+	<style type="text/css">
+	    body {
+		    font:  16px Courier New, monospace;
+		    line-height: 15px;
+		    padding: 2em 3em;
+	    }
+	    table.gridtable {
+		    font: italic 18px Consolas;
+		    color:#333333;
+		    border-width: 1px;
+		    border-color: Gainsboro;
+		    border-collapse: collapse;
+	    }
+	    table.gridtable th {
+		    font: italic bold 18px Consolas;
+		    text-align: center;
+		    border-width: 1px;
+		    padding: 5px;
+		    border-style: solid;
+		    border-color: Gainsboro;
+		    background-color: #dedede;
+	    }
+	    table.gridtable td {
+		    font: italic bold 14px Consolas;
+		    border-width: 1px;
+		    padding: 5px;
+		    border-style: solid;
+		    border-color: Gainsboro;
+		    background-color: #ffffff;
+	    }
+    </style>
+
+    <script type="text/javascript" src="jquery-1.11.2.min.js"></script>
+    <script type="text/javascript" src="jquery.sparkline.js"></script>
+    <script type="text/javascript">
+        $(function() {
+	    $('.bryanspark').sparkline('html', { tagOptionsPrefix: 's', enableTagOptions: true } );
+	    $('.cpu').sparkline('html', { type: 'line', lineColor:'red', fillColor:"MistyRose", height:"30", 
+		    width:"150", chartRangeMin:"0", chartRangeMax:"50", chartRangeClip: true } );
+	    $('.mem').sparkline('html', { type: 'line', lineColor:'blue', fillColor:"MistyRose", height:"30", 
+		    width:"150", chartRangeMin:"0", chartRangeMax:"100", chartRangeClip: true } );
+	    $('.disk1').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
+		    width:"150", chartRangeMin:"0", chartRangeMax:"10", chartRangeClip: true } );
+	    $('.disk2').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
+		    width:"150", chartRangeMin:"0", chartRangeMax:"10", chartRangeClip: true } );
+        });
+    </script>
+    </head>
+    <body>
+    <b>Test</b> <hr>
+
+'@
+        $Output
+    }
+
+    End{}
+}
+
+<#
+.Synopsis
+   Short description
+.DESCRIPTION
+   Long description
+.PARAMETER Param1
+Help for Param1
+.EXAMPLE
+   Example of how to use this cmdlet
+.EXAMPLE
+   Another example of how to use this cmdlet
+#>
+function Output-PageFooter #creates Page Footer string
+{
+    [CmdletBinding()]
+    [OutputType([string])]
+    Param
+    (
+        #[Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("p1")][string]$Param1,        
+        #[Parameter(Mandatory=$true, ValueFromPipelineByPropertyName=$true, Position=1)][int]$Param2
+    )
+
+    Begin{}
+
+    Process {
+        [string]$Output = "</body>`r`n</html>`r`n"
+        $Output
+    }
+
+    End{}
+}
+
 ## ---------------------------------------Script starts here---------------------------------
 $datastore = "C:\Users\Bryan\Documents\WindowsPowerShell\PSPerf\datastore.clixml"
 if (!$StorageHash) {
@@ -204,6 +320,11 @@ $computername = 's1'
 $pdata = Get-PerfData $computername
 add-perfdata -StorageHash $StorageHash -Computername $computername -PerfData $pdata
 Export-Clixml -InputObject $StorageHash -Path $datastore
+$htmlfile = "C:\Users\Bryan\Documents\WindowsPowerShell\PSPerf\PSPerf.html"
+$htmlstring = Output-Pageheader
+$htmlstring += Output-CurrentPerfTable -DataStore $StorageHash
+$htmlstring += Output-PageFooter
+out-file -InputObject $htmlstring -FilePath $htmlfile -Encoding UTF8 -Force
 
 <# 
 Next steps:
