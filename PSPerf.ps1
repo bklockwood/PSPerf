@@ -156,26 +156,38 @@ function Write-CurrentPerfTable
 
     Begin{}
     Process {
+        [string]$Output = "<hr>`r`n"
+        $Output += "<table class=""gridtable"">`r`n"
+        $Output += "<tr><th></th><th>cpu</th><th>mem</th><th>disk1</th><th>disk2</th></tr>`r`n"
+        
         #start walking down the object. this should be recursive but I am lazy
         foreach ($key in $DataStore.Keys) {
             if ($DataStore.$key.GetType() -eq [System.Collections.Hashtable] ) {
-                write-host $key
+                $Computername = $key
             } else {
                 write-host $key $datastore.$key
             }
             foreach ($subkey in $DataStore.$key.Keys) {
                 if ($DataStore.$key.$subkey.GetType() -eq [System.Collections.Hashtable]) {
-                    write-host " " $subkey 
                     foreach ($subsubkey in $DataStore.$key.$subkey.Keys) {
-                        write-host "  " $subsubkey $DataStore.$key.$subkey.$subsubkey
+                        if ($subsubkey -like "0*") {$disk1 = $DataStore.$key.$subkey.$subsubkey}
+                        if ($subsubkey -like "1*") {$disk2 = $DataStore.$key.$subkey.$subsubkey}
                     } 
                 } else {
-                    write-host " " $subkey $DataStore.$key.$subkey
+                    if ($subkey -eq "CpuQueue") {$cpu = $DataStore.$key.$subkey}
+                    if ($subkey -eq "PagesPerSec") {$mem = $DataStore.$key.$subkey}
                 }
             }
+            $Output += "<tr><td>$Computername</td>`r`n"
+            $Output += "<td><span class=""cpu"">$($cpu -join(","))</span></td>`r`n"
+            $Output += "<td><span class=""mem"">$($mem -join(","))</span></td>`r`n"
+            $Output += "<td><span class=""disk1"">$($disk1 -join(","))</span></td>`r`n"
+            $Output += "<td><span class=""disk2"">$($disk2 -join(","))</span></td>`r`n"
+            $Output += "</tr>`r`n`r`n"
         }
-    }
-
+        $Output += "</table>`r`n`r`n"
+        $Output
+    } #end process block
     End{}
 }
 
