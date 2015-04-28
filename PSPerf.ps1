@@ -42,28 +42,34 @@ function Get-PerfData #queries a single computer for performance data
     (
         [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
         [Alias("hostname")]
-        [string]$ComputerName
+        [string[]]$ComputerName
     )
 
     Begin{}
-    Process {
-        #create two hashtable arrays, populate with data from perf counters
-        $datahash = @{}
-        $dqhash = @{}
+    Process {        
         $perfcounters= '\System\Processor Queue Length', 
             '\Memory\Pages Input/Sec', 
             '\PhysicalDisk(*)\Avg. Disk Queue Length'
         foreach ($comp in $ComputerName) {
-        $perfdata = get-counter -ComputerName $computername -counter $perfcounters
-            foreach ($item in $perfdata.CounterSamples) {
-                if ($item.path -like "*Processor*") {$datahash.Add("CpuQueue",$item.cookedvalue)}
-                if ($item.path -like "*Pages*") {$datahash.Add("PagesPerSec", $item.cookedvalue)}
-                if ($item.path -like "*Physicaldisk*") {
-                    $dqhash.Add($item.InstanceName, $item.CookedValue)
+            $PerfData = @{}
+            $dqhash = @{}
+            $pdata = get-counter -ComputerName $computername -counter $perfcounters -ErrorAction Ignore 
+            #if $pdata timestamp is null, no perf data was received
+            if ($pdata.TimeStamp -ne $null) {        
+                foreach ($item in $pdata.CounterSamples) {
+                    if ($item.path -like "*Processor*") {$PerfData.Add("CpuQueue",$item.cookedvalue)}
+                    if ($item.path -like "*Pages*") {$PerfData.Add("PagesPerSec", $item.cookedvalue)}
+                    if ($item.path -like "*Physicaldisk*") {$dqhash.Add($item.InstanceName, $item.CookedValue)}
                 }
+                $PerfData.Add("DiskQueues", $dqhash)
+                write $comp 
+                $PerfData
+            } else {
+                #write an object with null values (not sure I have the disk queues bit correct)
+                $PerfData.Add("CpuQueue", $null)
+                $PerfData.Add("PagesPerSec", $null)
+                $PerfData.Add("DiskQueues", $null)
             }
-            $datahash.Add("DiskQueues", $dqhash)
-            $datahash
         }
     }
     End{}
@@ -91,7 +97,7 @@ function Add-PerfData #Adds get-perfdata output to hashtable of previously colle
     #[OutputType([int])]
     Param
     (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("p1")][hashtable]$StorageHash,        
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][hashtable]$StorageHash,        
         [Parameter(Mandatory=$true, ValueFromPipelineByPropertyName=$true, Position=1)][string]$ComputerName,
         [Parameter(Mandatory=$true, ValueFromPipelineByPropertyName=$true, Position=2)][hashtable]$PerfData
     )
@@ -142,7 +148,6 @@ function Add-PerfData #Adds get-perfdata output to hashtable of previously colle
    Full path of file (usually a *.html) to output to.
 .EXAMPLE
    Example of how to use this cmdlet
-
 #>
 function Output-CurrentPerfTable  #builds the [string] table of performance data
 {
@@ -259,7 +264,6 @@ function Output-Pageheader  #creates Page Header string
 		    background-color: #ffffff;
 	    }
     </style>
-
     <script type="text/javascript" src="jquery-1.11.2.min.js"></script>
     <script type="text/javascript" src="jquery.sparkline.js"></script>
     <script type="text/javascript">
@@ -278,7 +282,6 @@ function Output-Pageheader  #creates Page Header string
     </head>
     <body>
     <b>Test</b> <hr>
-
 '@
         $Output
     }
@@ -319,6 +322,7 @@ function Output-PageFooter #creates Page Footer string
 }
 
 ## ---------------------------------------Script starts here---------------------------------
+break
 $psperfdir = "C:\Users\bryanda"
 $datastore = "$psperfdir\datastore.clixml"
 if (!$StorageHash) {
@@ -342,6 +346,5 @@ out-file -InputObject $htmlstring -FilePath $htmlfile -Encoding UTF8 -Force
 
 <# 
 Next steps:
-
- Trim each array to latest 144 items
+ 
 #> 
