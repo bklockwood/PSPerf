@@ -174,7 +174,7 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
         $Output += "<tr><th></th><th>cpu</th><th>mem</th><th>disk0</th><th>disk1</th></tr>`r`n"
         
         #start walking down the object. this should be recursive but I am lazy
-        foreach ($key in $DataStore.Keys) {
+        foreach ($key in $DataStore.Keys | Sort $key) {
             if ($DataStore.$key.GetType() -eq [System.Collections.Hashtable] ) {
                 $Computername = $key
             } 
@@ -199,9 +199,7 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
                     if ($subkey -eq "PagesPerSec") {$mem = $DataStore.$key.$subkey}
                 }
             }
-            if ($cpu[-1] -eq "null") { #if no CpuQueue value received, mark computer with black backround, white text
-                $date = date
-                $date = $date.ToString("HH:mm")
+            if ($cpu[-1] -eq "null") { #if no CpuQueue value received, mark computer with black backround, red text
                 $Output += "<tr><td style=""background-color:black""><font color=""red"">$Computername</td>`r`n"
             } else {
                 $Output += "<tr><td>$Computername</td>`r`n"
