@@ -56,15 +56,15 @@ function Get-PerfData #queries a single computer for performance data
         foreach ($comp in $ComputerName) {
             $perfdata = get-counter -ComputerName $computername -counter $perfcounters -ErrorAction Ignore
             foreach ($item in $perfdata.CounterSamples) {
-                if ($item.path -like "*Processor*") {$datahash.Add("CpuQueue",$item.cookedvalue)}
-                if ($item.path -like "*Pages*") {$datahash.Add("PagesPerSec", $item.cookedvalue)}
+                if ($item.path -like "*Processor*") {$datahash.Add("CpuQueue",[math]::Round($item.cookedvalue))}
+                if ($item.path -like "*Pages*") {$datahash.Add("PagesPerSec", [math]::Round($item.cookedvalue))}
                 if ($item.path -like "*Physicaldisk*") {
                     if ($($item.instancename) -ne "_total") {
                         #perfmon names disk instances like so: "0 c: d:", "1 f: g:"
                         #store as "disk0", "disk1" etc.
                         [string]$diskname = $($item.instancename)
                         $diskname = "disk$($diskname.substring(0,1))"
-                        $dqhash.Add($diskname, $item.CookedValue) 
+                        $dqhash.Add($diskname, [math]::Round($item.cookedvalue)) 
                     }                   
                 }
             }
@@ -171,7 +171,7 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
     Begin{}
     Process {
         [string]$Output = "<table class=""gridtable"">`r`n"
-        $Output += "<tr><th></th><th>cpu</th><th>mem</th><th>disk1</th><th>disk2</th></tr>`r`n"
+        $Output += "<tr><th></th><th>cpu</th><th>mem</th><th>disk0</th><th>disk1</th></tr>`r`n"
         
         #start walking down the object. this should be recursive but I am lazy
         foreach ($key in $DataStore.Keys) {
@@ -202,14 +202,14 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
             if ($cpu[-1] -eq "null") { #if no CpuQueue value received, mark computer with black backround, white text
                 $date = date
                 $date = $date.ToString("HH:mm")
-                $Output += "<tr><td style=""background-color:black""><font color=""white"">$Computername</td>`r`n"
+                $Output += "<tr><td style=""background-color:black""><font color=""red"">$Computername</td>`r`n"
             } else {
                 $Output += "<tr><td>$Computername</td>`r`n"
             }
             $Output += "<td><span class=""cpu"">$($cpu -join(","))</span></td>`r`n"
             $Output += "<td><span class=""mem"">$($mem -join(","))</span></td>`r`n"
-            $Output += "<td><span class=""disk1"">$($disk1 -join(","))</span></td>`r`n"
-            $Output += "<td><span class=""disk2"">$($disk2 -join(","))</span></td>`r`n"
+            $Output += "<td><span class=""disk0"">$($disk1 -join(","))</span></td>`r`n"
+            $Output += "<td><span class=""disk1"">$($disk2 -join(","))</span></td>`r`n"
             $Output += "</tr>`r`n`r`n"
         }
         $Output += "</table>`r`n`r`n"
@@ -289,9 +289,9 @@ function Output-Pageheader  #creates Page Header string
 		    width:"100", chartRangeMin:"0", chartRangeMax:"25", chartRangeClip: true } );
 	    $('.mem').sparkline('html', { type: 'line', lineColor:'blue', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"50", chartRangeClip: true } );
-	    $('.disk1').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
+	    $('.disk0').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
-	    $('.disk2').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
+	    $('.disk1').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
         });
     </script>
