@@ -42,34 +42,42 @@ function Get-PerfData #queries a single computer for performance data
     (
         [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
         [Alias("hostname")]
-        [string[]]$ComputerName
+        [string]$ComputerName
     )
 
     Begin{}
-    Process {        
+    Process {
+        #create two hashtable arrays, populate with data from perf counters
+        $datahash = @{}
+        $dqhash = @{}
         $perfcounters= '\System\Processor Queue Length', 
             '\Memory\Pages Input/Sec', 
             '\PhysicalDisk(*)\Avg. Disk Queue Length'
         foreach ($comp in $ComputerName) {
-            $PerfData = @{}
-            $dqhash = @{}
-            $pdata = get-counter -ComputerName $computername -counter $perfcounters -ErrorAction Ignore 
-            #if $pdata timestamp is null, no perf data was received
-            if ($pdata.TimeStamp -ne $null) {        
-                foreach ($item in $pdata.CounterSamples) {
-                    if ($item.path -like "*Processor*") {$PerfData.Add("CpuQueue",$item.cookedvalue)}
-                    if ($item.path -like "*Pages*") {$PerfData.Add("PagesPerSec", $item.cookedvalue)}
-                    if ($item.path -like "*Physicaldisk*") {$dqhash.Add($item.InstanceName, $item.CookedValue)}
+            $perfdata = get-counter -ComputerName $computername -counter $perfcounters -ErrorAction Ignore
+            foreach ($item in $perfdata.CounterSamples) {
+                if ($item.path -like "*Processor*") {$datahash.Add("CpuQueue",$item.cookedvalue)}
+                if ($item.path -like "*Pages*") {$datahash.Add("PagesPerSec", $item.cookedvalue)}
+                if ($item.path -like "*Physicaldisk*") {
+                    if ($($item.instancename) -ne "_total") {
+                        #perfmon names disk instances like so: "0 c: d:", "1 f: g:"
+                        #store as "disk0", "disk1" etc.
+                        [string]$diskname = $($item.instancename)
+                        $diskname = "disk$($diskname.substring(0,1))"
+                        $dqhash.Add($diskname, $item.CookedValue) 
+                    }                   
                 }
-                $PerfData.Add("DiskQueues", $dqhash)
-                write $comp 
-                $PerfData
-            } else {
-                #write an object with null values (not sure I have the disk queues bit correct)
-                $PerfData.Add("CpuQueue", $null)
-                $PerfData.Add("PagesPerSec", $null)
-                $PerfData.Add("DiskQueues", $null)
             }
+            #if any counter returns no data, populate with string "null"
+            #because thats what jquery.sparklines will process properly
+            if ($datahash.Keys -notcontains "CpuQueue") {$datahash.Add("CpuQueue","null")}
+            if ($datahash.Keys -notcontains "PagesPerSec") {$datahash.Add("PagesPerSec","null")}
+            if ($dqhash.Count -lt 1) {
+                $dqhash.Add("disk0", "null")
+                $dqhash.Add("disk1", "null")                
+            }
+            $datahash.Add("DiskQueues", $dqhash)
+            $datahash
         }
     }
     End{}
@@ -97,7 +105,7 @@ function Add-PerfData #Adds get-perfdata output to hashtable of previously colle
     #[OutputType([int])]
     Param
     (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][hashtable]$StorageHash,        
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("p1")][hashtable]$StorageHash,        
         [Parameter(Mandatory=$true, ValueFromPipelineByPropertyName=$true, Position=1)][string]$ComputerName,
         [Parameter(Mandatory=$true, ValueFromPipelineByPropertyName=$true, Position=2)][hashtable]$PerfData
     )
@@ -148,6 +156,7 @@ function Add-PerfData #Adds get-perfdata output to hashtable of previously colle
    Full path of file (usually a *.html) to output to.
 .EXAMPLE
    Example of how to use this cmdlet
+
 #>
 function Output-CurrentPerfTable  #builds the [string] table of performance data
 {
@@ -176,10 +185,10 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
                         while ($DataStore.$key.$subkey.$subsubkey.Count -gt 144) {
                                 $DataStore.$key.$subkey.$subsubkey.RemoveAt(0)
                             }
-                        if ($subsubkey -like "0*") {
+                        if ($subsubkey -eq "disk0") {
                             $disk1 = $DataStore.$key.$subkey.$subsubkey
                             }
-                        if ($subsubkey -like "1*") {$disk2 = $DataStore.$key.$subkey.$subsubkey}
+                        if ($subsubkey -eq "disk1") {$disk2 = $DataStore.$key.$subkey.$subsubkey}
                     } 
                 } else {
                     #if array has > 144 elements, shrink to 144 (removing first, oldest elements)
@@ -190,7 +199,13 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
                     if ($subkey -eq "PagesPerSec") {$mem = $DataStore.$key.$subkey}
                 }
             }
-            $Output += "<tr><td>$Computername</td>`r`n"
+            if ($cpu[-1] -eq "null") { #if no CpuQueue value received, mark computer with black backround, white text
+                $date = date
+                $date = $date.ToString("HH:mm")
+                $Output += "<tr><td style=""background-color:black""><font color=""white"">$Computername</td>`r`n"
+            } else {
+                $Output += "<tr><td>$Computername</td>`r`n"
+            }
             $Output += "<td><span class=""cpu"">$($cpu -join(","))</span></td>`r`n"
             $Output += "<td><span class=""mem"">$($mem -join(","))</span></td>`r`n"
             $Output += "<td><span class=""disk1"">$($disk1 -join(","))</span></td>`r`n"
@@ -264,24 +279,26 @@ function Output-Pageheader  #creates Page Header string
 		    background-color: #ffffff;
 	    }
     </style>
+
     <script type="text/javascript" src="jquery-1.11.2.min.js"></script>
     <script type="text/javascript" src="jquery.sparkline.js"></script>
     <script type="text/javascript">
         $(function() {
 	    $('.bryanspark').sparkline('html', { tagOptionsPrefix: 's', enableTagOptions: true } );
 	    $('.cpu').sparkline('html', { type: 'line', lineColor:'red', fillColor:"MistyRose", height:"30", 
-		    width:"150", chartRangeMin:"0", chartRangeMax:"50", chartRangeClip: true } );
+		    width:"100", chartRangeMin:"0", chartRangeMax:"25", chartRangeClip: true } );
 	    $('.mem').sparkline('html', { type: 'line', lineColor:'blue', fillColor:"MistyRose", height:"30", 
-		    width:"150", chartRangeMin:"0", chartRangeMax:"100", chartRangeClip: true } );
+		    width:"100", chartRangeMin:"0", chartRangeMax:"50", chartRangeClip: true } );
 	    $('.disk1').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
-		    width:"150", chartRangeMin:"0", chartRangeMax:"10", chartRangeClip: true } );
+		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
 	    $('.disk2').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
-		    width:"150", chartRangeMin:"0", chartRangeMax:"10", chartRangeClip: true } );
+		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
         });
     </script>
     </head>
     <body>
     <b>Test</b> <hr>
+
 '@
         $Output
     }
@@ -322,14 +339,13 @@ function Output-PageFooter #creates Page Footer string
 }
 
 ## ---------------------------------------Script starts here---------------------------------
-break
 $psperfdir = "C:\Users\bryanda"
-$datastore = "$psperfdir\datastore.clixml"
+$datafile = "$psperfdir\datastore.clixml"
 if (!$StorageHash) {
-    if (get-item $datastore -ErrorAction ignore) {
-        $StorageHash = Import-Clixml -Path $datastore
+    if (get-item $datafile -ErrorAction ignore) {
+        $StorageHash = Import-Clixml -Path $datafile
     } else {
-    $StorageHash = @{}
+        $StorageHash = @{}
     }
 }
 $computername = 's2', 's3', 'hyper1', 'hyper2', 'ad6', 'ad5', 'fs5'
@@ -337,7 +353,7 @@ foreach ($comp in $computername) {
     $pdata = Get-PerfData $comp
     add-perfdata -StorageHash $StorageHash -Computername $comp -PerfData $pdata
 }
-Export-Clixml -InputObject $StorageHash -Path $datastore
+Export-Clixml -InputObject $StorageHash -Path $datafile -Force
 $htmlfile = "$psperfdir\PSPerf.html"
 $htmlstring = Output-Pageheader
 $htmlstring += Output-CurrentPerfTable -DataStore $StorageHash
@@ -346,5 +362,6 @@ out-file -InputObject $htmlstring -FilePath $htmlfile -Encoding UTF8 -Force
 
 <# 
 Next steps:
- 
+
+ Trim each array to latest 144 items
 #> 
