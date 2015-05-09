@@ -278,8 +278,8 @@ function Output-Pageheader  #creates Page Header string
 	    }
     </style>
 
-    <script type="text/javascript" src="jquery-1.11.2.min.js"></script>
-    <script type="text/javascript" src="jquery.sparkline.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/jquery/2.1.4/jquery.min.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/jquery.sparkline/2.1.2/jquery.sparkline.min.js"></script>
     <script type="text/javascript">
         $(function() {
 	    $('.bryanspark').sparkline('html', { tagOptionsPrefix: 's', enableTagOptions: true } );
