@@ -146,6 +146,43 @@ function Add-PerfData #Adds get-perfdata output to hashtable of previously colle
 
 <#
 .Synopsis
+   Writes the 'Status' cell of a system's status line
+.DESCRIPTION
+   Long description
+.Parameter ComputerName
+    The computername
+.EXAMPLE
+   Example of how to use this cmdlet
+.EXAMPLE
+   Another example of how to use this cmdlet
+#>
+function Output-StatusCell
+{
+    [CmdletBinding()]
+    [OutputType([int])]
+    Param
+    (
+        [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName=$true,Position=0)]$ComputerName
+    )
+
+    Begin{}
+    Process {
+        [bool]$reb = "$false" #true if server needs reboot
+        [int]$SecPatch = 0 #security patches outstanding
+        [int]$RecPatch = 0 #Recommended patches outstanding
+        [int]$OptPatch = 0 #Optional patches outstanding
+        [bool]$up = "$true" #True is server retruns CpuQueue value; false if not
+        #[System.DateTime]$changed #timestamp of last time the $up value changed
+        $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
+        $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
+        $Output += "<br><font size=""1"" color=""green"">~ ~d:~h:~m</font></td>`r`n"
+        $Output
+    }
+    End{}
+}
+
+<#
+.Synopsis
    Reads from hashtable of collected data and writes a web formatted table of
    sparklines.
 .DESCRIPTION
@@ -171,7 +208,7 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
     Begin{}
     Process {
         [string]$Output = "<table class=""gridtable"">`r`n"
-        $Output += "<tr><th></th><th>cpu</th><th>mem</th><th>disk0</th><th>disk1</th></tr>`r`n"
+        $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>disk0</th><th>disk1</th><th>eventlog</th></tr>`r`n"
         
         #start walking down the object. this should be recursive but I am lazy
         foreach ($key in $DataStore.Keys | Sort $key) {
@@ -204,10 +241,12 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
             } else {
                 $Output += "<tr><td>$Computername</td>`r`n"
             }
+            $Output += Output-StatusCell -ComputerName $Computername
             $Output += "<td><span class=""cpu"">$($cpu -join(","))</span></td>`r`n"
             $Output += "<td><span class=""mem"">$($mem -join(","))</span></td>`r`n"
             $Output += "<td><span class=""disk0"">$($disk1 -join(","))</span></td>`r`n"
             $Output += "<td><span class=""disk1"">$($disk2 -join(","))</span></td>`r`n"
+            $Output += "<td><span class=""eventlog""></span></td>"
             $Output += "</tr>`r`n`r`n"
         }
         $Output += "</table>`r`n`r`n"
@@ -278,19 +317,22 @@ function Output-Pageheader  #creates Page Header string
 	    }
     </style>
 
-    <script type="text/javascript" src="https://cdn.jsdelivr.net/jquery/2.1.4/jquery.min.js"></script>
-    <script type="text/javascript" src="https://cdn.jsdelivr.net/jquery.sparkline/2.1.2/jquery.sparkline.min.js"></script>
+    <script type="text/javascript" src="jquery-1.11.2.min.js"></script>
+    <script type="text/javascript" src="jquery.sparkline.js"></script>
     <script type="text/javascript">
         $(function() {
-	    $('.bryanspark').sparkline('html', { tagOptionsPrefix: 's', enableTagOptions: true } );
-	    $('.cpu').sparkline('html', { type: 'line', lineColor:'red', fillColor:"MistyRose", height:"30", 
+	      $('.cpu').sparkline('html', { type: 'line', lineColor:'red', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"25", chartRangeClip: true } );
-	    $('.mem').sparkline('html', { type: 'line', lineColor:'blue', fillColor:"MistyRose", height:"30", 
+	      $('.mem').sparkline('html', { type: 'line', lineColor:'blue', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"50", chartRangeClip: true } );
-	    $('.disk0').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
+	      $('.disk0').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
-	    $('.disk1').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
+	      $('.disk1').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
+          $('.diskused').sparkline('html', { type: 'bar', stackedBarColor:["DarkRed","SeaGreen"], barWidth:"10", 
+            zeroAxis:'false', height:"30", chartRangeMin:"0", chartRangeMax:"100"} );
+          $('.eventlog').sparkline('html', { type: 'line', lineColor:'SaddleBrown', fillColor:"MistyRose", height:"30", 
+            width:"100", chartRangeMin:"0", chartRangeMax:"10", chartRangeClip: true } )
         });
     </script>
     </head>
