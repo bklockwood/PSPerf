@@ -1,3 +1,4 @@
+function Get-PerfData {
 <#
 .Synopsis
    Gets a specific set of perfmon counters from local or remote computer.
@@ -34,8 +35,6 @@ PS> $pdata.DiskQueues._total
 PS> $pdata.CpuQueue
 1
 #>
-function Get-PerfData #queries a single computer for performance data
-{
     [CmdletBinding()]
     [OutputType([hashtable])]
     Param
@@ -83,9 +82,10 @@ function Get-PerfData #queries a single computer for performance data
     End{}
 }
 
+function Add-PerfData {
 <#
 .Synopsis
-   Stores perf data (from get-perfdata) into a hashtable
+   Stores perf data (from get-perfdata) into a hashtable of previously collected data
 .DESCRIPTION
    Recurses through the collected performance data, writes it 
    to arrays in the storage hashtable (which contains prior collected data)
@@ -99,8 +99,7 @@ function Get-PerfData #queries a single computer for performance data
 .EXAMPLE
    TBD
 #>
-function Add-PerfData #Adds get-perfdata output to hashtable of previously collected data
-{
+
     [CmdletBinding()]
     #[OutputType([int])]
     Param
@@ -144,6 +143,7 @@ function Add-PerfData #Adds get-perfdata output to hashtable of previously colle
     End{}
 }
 
+function Output-StatusCell {
 <#
 .Synopsis
    Writes the 'Status' cell of a system's status line
@@ -156,8 +156,7 @@ function Add-PerfData #Adds get-perfdata output to hashtable of previously colle
 .EXAMPLE
    Another example of how to use this cmdlet
 #>
-function Output-StatusCell
-{
+
     [CmdletBinding()]
     [OutputType([int])]
     Param
@@ -181,6 +180,7 @@ function Output-StatusCell
     End{}
 }
 
+function Output-CurrentPerfTable {
 <#
 .Synopsis
    Reads from hashtable of collected data and writes a web formatted table of
@@ -195,8 +195,7 @@ function Output-StatusCell
    Example of how to use this cmdlet
 
 #>
-function Output-CurrentPerfTable  #builds the [string] table of performance data
-{
+
     [CmdletBinding()]
     [OutputType([string])]
     Param
@@ -255,6 +254,7 @@ function Output-CurrentPerfTable  #builds the [string] table of performance data
     End{}
 }
 
+function Output-Pageheader {
 <#
 .Synopsis
    Writes page header
@@ -267,8 +267,6 @@ Help for Param1
 .EXAMPLE
    Another example of how to use this cmdlet
 #>
-function Output-Pageheader  #creates Page Header string
-{
     [CmdletBinding()]
     [OutputType([string])]
     Param
@@ -346,6 +344,7 @@ function Output-Pageheader  #creates Page Header string
     End{}
 }
 
+function Output-PageFooter { 
 <#
 .Synopsis
    Short description
@@ -358,8 +357,6 @@ Help for Param1
 .EXAMPLE
    Another example of how to use this cmdlet
 #>
-function Output-PageFooter #creates Page Footer string
-{
     [CmdletBinding()]
     [OutputType([string])]
     Param
@@ -377,6 +374,114 @@ function Output-PageFooter #creates Page Footer string
 
     End{}
 }
+
+Function Get-IniContent { 
+<# 
+.Synopsis 
+    Gets the content of an INI file 
+         
+.Description 
+    Gets the content of an INI file and returns it as a hashtable 
+         
+.Notes 
+    Author		: Oliver Lipkau <oliver@lipkau.net> 
+    Blog		: http://oliver.lipkau.net/blog/ 
+	Source		: https://github.com/lipkau/PsIni
+                  http://gallery.technet.microsoft.com/scriptcenter/ea40c1ef-c856-434b-b8fb-ebd7a76e8d91
+    Version		: 1.0 - 2010/03/12 - Initial release 
+                  1.1 - 2014/12/11 - Typo (Thx SLDR)
+                                     Typo (Thx Dave Stiff)
+         
+    #Requires -Version 2.0 
+         
+.Inputs 
+    System.String 
+         
+.Outputs 
+    System.Collections.Hashtable 
+         
+.Parameter FilePath 
+    Specifies the path to the input file. 
+         
+.Example 
+    $FileContent = Get-IniContent "C:\myinifile.ini" 
+    ----------- 
+    Description 
+    Saves the content of the c:\myinifile.ini in a hashtable called $FileContent 
+     
+.Example 
+    $inifilepath | $FileContent = Get-IniContent 
+    ----------- 
+    Description 
+    Gets the content of the ini file passed through the pipe into a hashtable called $FileContent 
+     
+.Example 
+    C:\PS>$FileContent = Get-IniContent "c:\settings.ini" 
+    C:\PS>$FileContent["Section"]["Key"] 
+    ----------- 
+    Description 
+    Returns the key "Key" of the section "Section" from the C:\settings.ini file 
+         
+.Link 
+    Out-IniFile 
+#> 
+     
+[CmdletBinding()] 
+Param( 
+    [ValidateNotNullOrEmpty()] 
+    [ValidateScript({(Test-Path $_) -and ((Get-Item $_).Extension -eq ".ini")})] 
+    [Parameter(ValueFromPipeline=$True,Mandatory=$True)] 
+    [string]$FilePath 
+) 
+     
+Begin 
+    {Write-Verbose "$($MyInvocation.MyCommand.Name):: Function started"} 
+         
+Process 
+{ 
+    Write-Verbose "$($MyInvocation.MyCommand.Name):: Processing file: $Filepath" 
+             
+    $ini = @{} 
+    switch -regex -file $FilePath 
+    { 
+        "^\[(.+)\]$" # Section 
+        { 
+            $section = $matches[1] 
+            $ini[$section] = @{} 
+            $CommentCount = 0 
+        } 
+        "^(;.*)$" # Comment 
+        { 
+            if (!($section)) 
+            { 
+                $section = "No-Section" 
+                $ini[$section] = @{} 
+            } 
+            $value = $matches[1] 
+            $CommentCount = $CommentCount + 1 
+            $name = "Comment" + $CommentCount 
+            $ini[$section][$name] = $value 
+        }  
+        "(.+?)\s*=\s*(.*)" # Key 
+        { 
+            if (!($section)) 
+            { 
+                $section = "No-Section" 
+                $ini[$section] = @{} 
+            } 
+            $name,$value = $matches[1..2] 
+            $ini[$section][$name] = $value 
+        } 
+    } 
+    Write-Verbose "$($MyInvocation.MyCommand.Name):: Finished Processing file: $FilePath" 
+    Return $ini 
+} 
+         
+End 
+    {Write-Verbose "$($MyInvocation.MyCommand.Name):: Function ended"} 
+
+}
+
 
 ## ---------------------------------------Script starts here---------------------------------
 $psperfdir = "C:\Users\bryanda"
@@ -403,5 +508,4 @@ out-file -InputObject $htmlstring -FilePath $htmlfile -Encoding UTF8 -Force
 <# 
 Next steps:
 
- Trim each array to latest 144 items
 #> 
