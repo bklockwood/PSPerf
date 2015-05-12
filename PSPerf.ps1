@@ -210,7 +210,7 @@ function Output-CurrentPerfTable {
         $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>disk0</th><th>disk1</th><th>eventlog</th></tr>`r`n"
         
         #start walking down the object. this should be recursive but I am lazy
-        foreach ($key in $DataStore.Keys | Sort $key) {
+        foreach ($key in $DataStore.Keys | Sort ) {
             if ($DataStore.$key.GetType() -eq [System.Collections.Hashtable] ) {
                 $Computername = $key
             } 
@@ -484,8 +484,11 @@ End
 
 
 ## ---------------------------------------Script starts here---------------------------------
-$psperfdir = "C:\Users\bryanda"
-$datafile = "$psperfdir\datastore.clixml"
+$config = Get-IniContent .\psperf.ini
+[string]$datafile = $config.files.datafile
+[string]$htmlfile = $config.files.htmlfile
+write-host $htmlfile
+write-host $datafile
 if (!$StorageHash) {
     if (get-item $datafile -ErrorAction ignore) {
         $StorageHash = Import-Clixml -Path $datafile
@@ -493,13 +496,16 @@ if (!$StorageHash) {
         $StorageHash = @{}
     }
 }
-$computername = 's2', 's3', 'hyper1', 'hyper2', 'ad6', 'ad5', 'fs5'
-foreach ($comp in $computername) {
-    $pdata = Get-PerfData $comp
-    add-perfdata -StorageHash $StorageHash -Computername $comp -PerfData $pdata
+
+foreach ($comp in ( $config.keys | sort) ) {
+    if ($comp -ne "files" -and $comp -ne "defaults") {
+        write-host $comp
+        $pdata = Get-PerfData $comp
+        add-perfdata -StorageHash $StorageHash -Computername $comp -PerfData $pdata
+    }
 }
 Export-Clixml -InputObject $StorageHash -Path $datafile -Force
-$htmlfile = "$psperfdir\PSPerf.html"
+
 $htmlstring = Output-Pageheader
 $htmlstring += Output-CurrentPerfTable -DataStore $StorageHash
 $htmlstring += Output-PageFooter
