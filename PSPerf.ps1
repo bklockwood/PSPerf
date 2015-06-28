@@ -41,7 +41,9 @@ PS> $pdata.CpuQueue
     (
         [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
         [Alias("hostname")]
-        [string]$ComputerName
+        [string]$ComputerName,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]
+        $PerfCounters
     )
 
     Begin{}
@@ -49,20 +51,18 @@ PS> $pdata.CpuQueue
         #create two hashtable arrays, populate with data from perf counters
         $datahash = @{}
         $dqhash = @{}
-        $perfcounters= '\System\Processor Queue Length', 
-            '\Memory\Pages Input/Sec', 
-            '\PhysicalDisk(*)\Avg. Disk Queue Length'
+        
         foreach ($comp in $ComputerName) {
-            $perfdata = get-counter -ComputerName $computername -counter $perfcounters -ErrorAction Ignore
+            $perfdata = get-counter -ComputerName $computername -counter $PerfCounters -ErrorAction Ignore
             foreach ($item in $perfdata.CounterSamples) {
                 if ($item.path -like "*Processor*") {$datahash.Add("CpuQueue",[math]::Round($item.cookedvalue))}
                 if ($item.path -like "*Pages*") {$datahash.Add("PagesPerSec", [math]::Round($item.cookedvalue))}
                 if ($item.path -like "*Physicaldisk*") {
                     if ($($item.instancename) -ne "_total") {
-                        #perfmon names disk instances like so: "0 c: d:", "1 f: g:"
+                        #perfmon names physicaldisk instances like so: "0 c: d:", "1 f: g:"
                         #store as "disk0", "disk1" etc.
                         [string]$diskname = $($item.instancename)
-                        $diskname = "disk$($diskname.substring(0,1))"
+                        #$diskname = "disk$($diskname.substring(0,1))" no, store as the actual instancename (using logicaldisks now)
                         $dqhash.Add($diskname, [math]::Round($item.cookedvalue)) 
                     }                   
                 }
@@ -485,31 +485,32 @@ End
 
 ## ---------------------------------------Script starts here---------------------------------
 $config = Get-IniContent .\psperf.ini
-[string]$datafile = $config.files.datafile
-[string]$htmlfile = $config.files.htmlfile
-write-host $htmlfile
-write-host $datafile
 if (!$StorageHash) {
     if (get-item $datafile -ErrorAction ignore) {
-        $StorageHash = Import-Clixml -Path $datafile
+        $StorageHash = Import-Clixml -Path $config.files.datafile
     } else {
         $StorageHash = @{}
     }
 }
 
-foreach ($comp in ( $config.keys | sort) ) {
-    if ($comp -ne "files" -and $comp -ne "defaults") {
-        write-host $comp
-        $pdata = Get-PerfData $comp
-        add-perfdata -StorageHash $StorageHash -Computername $comp -PerfData $pdata
+foreach ($target in ( $config.targets.keys | sort) ) {
+    write-host $target
+    #read perfcounters to retreive from this target, or use defaults
+    if ($config.$target.counters) {
+        $PerfCounters = $config.$target.counters.split(",")
+    } else {
+        $PerfCounters = $config.defaults.counters.split(",")
     }
+    write-host $PerfCounters
+    $pdata = Get-PerfData -ComputerName $target -PerfCounters $PerfCounters
+    add-perfdata -StorageHash $StorageHash -Computername $target -PerfData $pdata
 }
 Export-Clixml -InputObject $StorageHash -Path $datafile -Force
 
 $htmlstring = Output-Pageheader
 $htmlstring += Output-CurrentPerfTable -DataStore $StorageHash
 $htmlstring += Output-PageFooter
-out-file -InputObject $htmlstring -FilePath $htmlfile -Encoding UTF8 -Force
+out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force
 
 <# 
 Next steps:
