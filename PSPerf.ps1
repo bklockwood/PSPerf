@@ -53,18 +53,24 @@ PS> $pdata.CpuQueue
         $dqhash = @{}
         
         foreach ($comp in $ComputerName) {
-            $perfdata = get-counter -ComputerName $computername -counter $PerfCounters -ErrorAction Ignore
-            foreach ($item in $perfdata.CounterSamples) {
-                if ($item.path -like "*Processor*") {$datahash.Add("CpuQueue",[math]::Round($item.cookedvalue))}
-                if ($item.path -like "*Pages*") {$datahash.Add("PagesPerSec", [math]::Round($item.cookedvalue))}
-                if ($item.path -like "*Physicaldisk*") {
-                    if ($($item.instancename) -ne "_total") {
-                        #perfmon names physicaldisk instances like so: "0 c: d:", "1 f: g:"
-                        #store as "disk0", "disk1" etc.
-                        [string]$diskname = $($item.instancename)
-                        #$diskname = "disk$($diskname.substring(0,1))" no, store as the actual instancename (using logicaldisks now)
-                        $dqhash.Add($diskname, [math]::Round($item.cookedvalue)) 
-                    }                   
+            $error.Clear()
+            $perfdata = get-counter -ComputerName $computername -counter $PerfCounters -ErrorAction SilentlyContinue
+            if ($error) {
+                write-host "ERROR"
+            } else {
+                foreach ($item in $perfdata.CounterSamples) {
+                    write-host $item.path, $item.status, $item.CookedValue
+                    if ($item.path -like "*Processor*") {$datahash.Add("CpuQueue",[math]::Round($item.cookedvalue))}
+                    if ($item.path -like "*Pages*") {$datahash.Add("PagesPerSec", [math]::Round($item.cookedvalue))}
+                    if ($item.path -like "*Logicaldisk*") {
+                        if ($($item.instancename) -ne "_total") {
+                            #perfmon names physicaldisk instances like so: "0 c: d:", "1 f: g:"
+                            #store as "disk0", "disk1" etc.
+                            [string]$diskname = $($item.instancename)
+                            #$diskname = "disk$($diskname.substring(0,1))" no, store as the actual instancename (using logicaldisks now)
+                            $dqhash.Add($diskname, [math]::Round($item.cookedvalue)) 
+                        }                   
+                    }
                 }
             }
             #if any counter returns no data, populate with string "null"
@@ -72,8 +78,9 @@ PS> $pdata.CpuQueue
             if ($datahash.Keys -notcontains "CpuQueue") {$datahash.Add("CpuQueue","null")}
             if ($datahash.Keys -notcontains "PagesPerSec") {$datahash.Add("PagesPerSec","null")}
             if ($dqhash.Count -lt 1) {
-                $dqhash.Add("disk0", "null")
-                $dqhash.Add("disk1", "null")                
+                write-host "dqhash has no values!"
+                $dqhash.Add("C:", "null")
+                $dqhash.Add("D:", "null")                
             }
             $datahash.Add("DiskQueues", $dqhash)
             $datahash
@@ -170,7 +177,7 @@ function Output-StatusCell {
         [int]$SecPatch = 0 #security patches outstanding
         [int]$RecPatch = 0 #Recommended patches outstanding
         [int]$OptPatch = 0 #Optional patches outstanding
-        [bool]$up = "$true" #True is server retruns CpuQueue value; false if not
+        [bool]$up = "$true" #True if server retruns CpuQueue value; false if not
         #[System.DateTime]$changed #timestamp of last time the $up value changed
         $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
         $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
@@ -207,7 +214,7 @@ function Output-CurrentPerfTable {
     Begin{}
     Process {
         [string]$Output = "<table class=""gridtable"">`r`n"
-        $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>disk0</th><th>disk1</th><th>eventlog</th></tr>`r`n"
+        $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>`r`n"
         
         #start walking down the object. this should be recursive but I am lazy
         foreach ($key in $DataStore.Keys | Sort ) {
@@ -221,10 +228,8 @@ function Output-CurrentPerfTable {
                         while ($DataStore.$key.$subkey.$subsubkey.Count -gt 144) {
                                 $DataStore.$key.$subkey.$subsubkey.RemoveAt(0)
                             }
-                        if ($subsubkey -eq "disk0") {
-                            $disk1 = $DataStore.$key.$subkey.$subsubkey
-                            }
-                        if ($subsubkey -eq "disk1") {$disk2 = $DataStore.$key.$subkey.$subsubkey}
+                        if ($subsubkey.ToUpper() -eq "C:") {$disk1 = $DataStore.$key.$subkey.$subsubkey}
+                        if ($subsubkey.ToUpper() -eq "D:") {$disk2 = $DataStore.$key.$subkey.$subsubkey}
                     } 
                 } else {
                     #if array has > 144 elements, shrink to 144 (removing first, oldest elements)
@@ -243,9 +248,10 @@ function Output-CurrentPerfTable {
             $Output += Output-StatusCell -ComputerName $Computername
             $Output += "<td><span class=""cpu"">$($cpu -join(","))</span></td>`r`n"
             $Output += "<td><span class=""mem"">$($mem -join(","))</span></td>`r`n"
-            $Output += "<td><span class=""disk0"">$($disk1 -join(","))</span></td>`r`n"
-            $Output += "<td><span class=""disk1"">$($disk2 -join(","))</span></td>`r`n"
             $Output += "<td><span class=""eventlog""></span></td>"
+            $Output += "<td valign=""bottom"">C:<span class=""disk0"">$($disk1 -join(","))</span>&nbsp D:<span class=""disk1"">$($disk2 -join(","))</span></td>`r`n"
+            #$Output += "<td><span class=""disk1"">$($disk2 -join(","))</span></td>`r`n"
+            
             $Output += "</tr>`r`n`r`n"
         }
         $Output += "</table>`r`n`r`n"
@@ -375,111 +381,106 @@ Help for Param1
     End{}
 }
 
-Function Get-IniContent { 
-<# 
-.Synopsis 
-    Gets the content of an INI file 
-         
-.Description 
-    Gets the content of an INI file and returns it as a hashtable 
-         
-.Notes 
-    Author		: Oliver Lipkau <oliver@lipkau.net> 
-    Blog		: http://oliver.lipkau.net/blog/ 
-	Source		: https://github.com/lipkau/PsIni
-                  http://gallery.technet.microsoft.com/scriptcenter/ea40c1ef-c856-434b-b8fb-ebd7a76e8d91
-    Version		: 1.0 - 2010/03/12 - Initial release 
-                  1.1 - 2014/12/11 - Typo (Thx SLDR)
-                                     Typo (Thx Dave Stiff)
-         
-    #Requires -Version 2.0 
-         
-.Inputs 
-    System.String 
-         
-.Outputs 
-    System.Collections.Hashtable 
-         
-.Parameter FilePath 
-    Specifies the path to the input file. 
-         
-.Example 
-    $FileContent = Get-IniContent "C:\myinifile.ini" 
-    ----------- 
-    Description 
-    Saves the content of the c:\myinifile.ini in a hashtable called $FileContent 
-     
-.Example 
-    $inifilepath | $FileContent = Get-IniContent 
-    ----------- 
-    Description 
-    Gets the content of the ini file passed through the pipe into a hashtable called $FileContent 
-     
-.Example 
-    C:\PS>$FileContent = Get-IniContent "c:\settings.ini" 
-    C:\PS>$FileContent["Section"]["Key"] 
-    ----------- 
-    Description 
-    Returns the key "Key" of the section "Section" from the C:\settings.ini file 
-         
-.Link 
-    Out-IniFile 
-#> 
-     
-[CmdletBinding()] 
-Param( 
-    [ValidateNotNullOrEmpty()] 
-    [ValidateScript({(Test-Path $_) -and ((Get-Item $_).Extension -eq ".ini")})] 
-    [Parameter(ValueFromPipeline=$True,Mandatory=$True)] 
-    [string]$FilePath 
-) 
-     
-Begin 
-    {Write-Verbose "$($MyInvocation.MyCommand.Name):: Function started"} 
-         
-Process 
-{ 
-    Write-Verbose "$($MyInvocation.MyCommand.Name):: Processing file: $Filepath" 
-             
-    $ini = @{} 
-    switch -regex -file $FilePath 
-    { 
-        "^\[(.+)\]$" # Section 
-        { 
-            $section = $matches[1] 
-            $ini[$section] = @{} 
-            $CommentCount = 0 
-        } 
-        "^(;.*)$" # Comment 
-        { 
-            if (!($section)) 
-            { 
-                $section = "No-Section" 
-                $ini[$section] = @{} 
-            } 
-            $value = $matches[1] 
-            $CommentCount = $CommentCount + 1 
-            $name = "Comment" + $CommentCount 
-            $ini[$section][$name] = $value 
-        }  
-        "(.+?)\s*=\s*(.*)" # Key 
-        { 
-            if (!($section)) 
-            { 
-                $section = "No-Section" 
-                $ini[$section] = @{} 
-            } 
-            $name,$value = $matches[1..2] 
-            $ini[$section][$name] = $value 
-        } 
-    } 
-    Write-Verbose "$($MyInvocation.MyCommand.Name):: Finished Processing file: $FilePath" 
-    Return $ini 
-} 
-         
-End 
-    {Write-Verbose "$($MyInvocation.MyCommand.Name):: Function ended"} 
+Function Get-IniContent {
+    <#
+    .Synopsis
+        Gets the content of an INI file
+    .Description
+        Gets the content of an INI file and returns it as a hashtable
+    .Notes
+        Author		: Oliver Lipkau <oliver@lipkau.net>
+        Blog		: http://oliver.lipkau.net/blog/
+		Source		: https://github.com/lipkau/PsIni
+                      http://gallery.technet.microsoft.com/scriptcenter/ea40c1ef-c856-434b-b8fb-ebd7a76e8d91
+        Version		: 1.0.0 - 2010/03/12 - OL - Initial release
+                      1.0.1 - 2014/12/11 - OL - Typo (Thx SLDR)
+                                              Typo (Thx Dave Stiff)
+                      1.0.2 - 2015/06/06 - OL - Improvment to switch (Thx Tallandtree)
+                      1.0.3 - 2015/06/18 - OL - Migrate to semantic versioning (GitHub issue#4)
+                      1.0.4 - 2015/06/18 - OL - Remove check for .ini extension (GitHub Issue#6)
+        #Requires -Version 2.0
+    .Inputs
+        System.String
+    .Outputs
+        System.Collections.Hashtable
+    .Parameter FilePath
+        Specifies the path to the input file.
+    .Example
+        $FileContent = Get-IniContent "C:\myinifile.ini"
+        -----------
+        Description
+        Saves the content of the c:\myinifile.ini in a hashtable called $FileContent
+    .Example
+        $inifilepath | $FileContent = Get-IniContent
+        -----------
+        Description
+        Gets the content of the ini file passed through the pipe into a hashtable called $FileContent
+    .Example
+        C:\PS>$FileContent = Get-IniContent "c:\settings.ini"
+        C:\PS>$FileContent["Section"]["Key"]
+        -----------
+        Description
+        Returns the key "Key" of the section "Section" from the C:\settings.ini file
+    .Link
+        Out-IniFile
+    #>
 
+    [CmdletBinding()]
+    Param(
+        [ValidateNotNullOrEmpty()]
+        [ValidateScript({(Test-Path $_)})]
+        [Parameter(ValueFromPipeline=$True,Mandatory=$True)]
+        [string]$FilePath
+    )
+
+    Begin
+        {Write-Verbose "$($MyInvocation.MyCommand.Name):: Function started"}
+
+    Process
+    {
+        Write-Verbose "$($MyInvocation.MyCommand.Name):: Processing file: $Filepath"
+
+        $ini = @{}
+        switch -regex -file $FilePath
+        {
+            "^\[(.+)\]$" # Section
+            {
+                $section = $matches[1]
+                $ini[$section] = @{}
+                $CommentCount = 0
+                continue
+            }
+            "^(;.*)$" # Comment
+            {
+                if (!($section))
+                {
+                    $section = "No-Section"
+                    $ini[$section] = @{}
+                }
+                $value = $matches[1]
+                $CommentCount = $CommentCount + 1
+                $name = "Comment" + $CommentCount
+                $ini[$section][$name] = $value
+                continue
+            }
+            "(.+?)\s*=\s*(.*)" # Key
+            {
+                if (!($section))
+                {
+                    $section = "No-Section"
+                    $ini[$section] = @{}
+                }
+                $name,$value = $matches[1..2]
+                $ini[$section][$name] = $value
+                continue
+            }
+        }
+        Write-Verbose "$($MyInvocation.MyCommand.Name):: Finished Processing file: $FilePath"
+        Return $ini
+    }
+
+    End
+        {Write-Verbose "$($MyInvocation.MyCommand.Name):: Function ended"}
 }
 
 
@@ -493,17 +494,21 @@ if (!$StorageHash) {
     }
 }
 
-foreach ($target in ( $config.targets.keys | sort) ) {
-    write-host $target
-    #read perfcounters to retreive from this target, or use defaults
-    if ($config.$target.counters) {
-        $PerfCounters = $config.$target.counters.split(",")
-    } else {
-        $PerfCounters = $config.defaults.counters.split(",")
+foreach ($target in ( $config.targets.keys | sort) ) {    
+    #Lipkau's Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. 
+    #ignore these!
+    if ($target -notLike "Comment*" ) {
+        write-host $target
+        #read perfcounters to retreive from this target, or use defaults
+        if ($config.$target.counters) {
+            $PerfCounters = $config.$target.counters.split(",")
+        } else {
+            $PerfCounters = $config.defaults.counters.split(",")
+        }
+        write-host $PerfCounters
+        $pdata = Get-PerfData -ComputerName $target -PerfCounters $PerfCounters
+        add-perfdata -StorageHash $StorageHash -Computername $target -PerfData $pdata
     }
-    write-host $PerfCounters
-    $pdata = Get-PerfData -ComputerName $target -PerfCounters $PerfCounters
-    add-perfdata -StorageHash $StorageHash -Computername $target -PerfData $pdata
 }
 Export-Clixml -InputObject $StorageHash -Path $datafile -Force
 
