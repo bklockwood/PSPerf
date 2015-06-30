@@ -468,7 +468,7 @@ Function Get-IniContent {
 ## ---------------------------------------Script starts here---------------------------------
 $config = Get-IniContent .\psperf.ini
 if (!$StorageHash) {
-    if (get-item $datafile -ErrorAction ignore) {
+    if (get-item $config.files.datafile -ErrorAction ignore) {
         $StorageHash = Import-Clixml -Path $config.files.datafile
     } else {
         $StorageHash = @{}
@@ -480,7 +480,7 @@ foreach ($target in ($config.targets.keys | sort) ) {
     #ignore these!
     if ($target -notLike "Comment*" ) {Get-PerfData -ComputerName $target -StorageHash $StorageHash}
 }
-Export-Clixml -InputObject $StorageHash -Path $datafile -Force
+Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
 
 $htmlstring = Output-Pageheader
 $htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash 
