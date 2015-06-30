@@ -302,7 +302,7 @@ Help for Param1
     </style>
 
     <script type="text/javascript" src="jquery-1.11.2.min.js"></script>
-    <script type="text/javascript" src="jquery.fortes.sparkline.min.js"></script>
+    <script type="text/javascript" src="jquery.sparkline.min.js"></script>
     <script type="text/javascript">
         $(function() {
 	      $('.cpu').sparkline('html', { type: 'line', lineColor:'red', fillColor:"MistyRose", height:"30", 
