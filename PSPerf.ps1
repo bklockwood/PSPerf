@@ -1,4 +1,4 @@
-function Get-PerfData {
+function Get-PerfDataOld {
 <#
 .Synopsis
    Gets a specific set of perfmon counters from local or remote computer.
@@ -89,7 +89,126 @@ PS> $pdata.CpuQueue
     End{}
 }
 
-function Add-PerfData {
+function Get-Perfdata {
+<#
+.Synopsis
+Gets and stores perf data into a hashtable of previously collected data
+.DESCRIPTION
+
+.PARAMETER ComputerName
+The computer to get perfmon counter data from.
+.PARAMETER PerfCounters
+Performance counters to retreive from ComputerName.
+.PARAMETER StorageHash
+The hash we'll add data to.
+
+.EXAMPLE
+   TBD
+#>
+
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    Param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
+        [Alias("hostname")]
+        [string]$ComputerName,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]
+        $StorageHash
+    )
+
+    Begin{}
+    Process {        
+        foreach ($comp in $ComputerName) {
+            Write-Verbose $comp
+            #if we haven't polled this computer before, create hashtable locations to store the data
+            if ($StorageHash.keys -notcontains $comp) {
+                Write-verbose " $comp not present in StorageHash, adding"
+                $StorageHash.Add($comp, @{})
+                $StorageHash.$comp.CpuQueue = New-Object System.Collections.ArrayList
+                $StorageHash.$comp.MemQueue = New-Object System.Collections.ArrayList
+                $StorageHash.$comp.Events = New-Object System.Collections.ArrayList
+                $storageHash.$comp.Add("DiskQueue",@{})
+                $storageHash.$comp.Add("DiskFree",@{})
+            }
+            $error.Clear()
+            $PerfCounters = '\System\Processor Queue Length',
+                            '\Memory\Pages Input/Sec',
+                            '\LogicalDisk(*)\Avg. Disk Queue Length',
+                            '\LogicalDisk(*)\% Free Space'
+            $perfdata = get-counter -ComputerName $computername -counter $PerfCounters -ErrorAction SilentlyContinue
+            if ($error) {
+                Write-Error "ERROR"
+            } else {
+                #test whether $perfdata.countersamples.path contains each of the counters we want 
+                #(if not, must write 'null')
+
+                #cpuqueue
+                $cdata=$perfdata.CounterSamples | Where-Object {$_.path -like "*process*"}
+                Write-Verbose " $($cdata.Path), $($cdata.CookedValue)"
+                if ($cdata.CookedValue -eq $null) {
+                    [void] $StorageHash.$comp.CpuQueue.Add("null")
+                } else {
+                    [void] $StorageHash.$comp.CpuQueue.Add($cdata.cookedvalue)
+                }
+
+                #memqueue
+                $cdata=$perfdata.CounterSamples | Where-Object {$_.path -like "*pages*"}
+                Write-Verbose " $($cdata.Path), $($cdata.CookedValue)"
+                if ($cdata.CookedValue -eq $null) {
+                    [void] $StorageHash.$comp.MemQueue.Add("null")
+                } else {
+                    [void] $StorageHash.$comp.MemQueue.Add($cdata.cookedvalue)
+                }
+
+                #events
+                #placeholder, I have not written the event gatherer yet
+                [void] $StorageHash.$comp.Events.Add("null")
+
+
+                #diskqueue
+                if ($config.$comp.disks) {
+                    $disks = $config.$comp.disks.split(",")
+                } else {
+                    $disks = $config.defaults.disks.split(",")
+                }
+                foreach ($disk in $disks) {
+                    Write-Verbose "  DiskQueue $disk"
+                    if (!$StorageHash.$comp.DiskQueue.$disk) {
+                        $StorageHash.$comp.DiskQueue.$disk = New-Object System.Collections.ArrayList
+                    }                
+                    $cdata=$perfdata.CounterSamples | 
+                        Where-Object {$_.path -like "*logicaldisk($disk)\avg. disk queue length*"}
+                    Write-Verbose "   $($cdata.Path), $($cdata.CookedValue)"
+                    if ($cdata.CookedValue -eq $null) {
+                        [void] $StorageHash.$comp.DiskQueue.$disk.Add("null")
+                    } else {
+                        [void] $StorageHash.$comp.DiskQueue.$disk.Add($cdata.cookedvalue)
+                    }
+                }
+
+                #diskfree (for each disk to check)
+                foreach ($disk in $disks) {
+                    Write-Verbose "  DiskFree $disk"
+                    if (!$StorageHash.$comp.DiskFree.$disk) {
+                        $StorageHash.$comp.DiskFree.$disk = New-Object System.Collections.ArrayList
+                    }                
+                    $cdata=$perfdata.CounterSamples | 
+                        Where-Object {$_.path -like "*logicaldisk($disk)\% free space*"}
+                    Write-Verbose "   $($cdata.Path), $($cdata.CookedValue)"
+                    if ($cdata.CookedValue -eq $null) {
+                        [void] $StorageHash.$comp.DiskFree.$disk.Add("null")
+                    } else {
+                        [void] $StorageHash.$comp.DiskFree.$disk.Add($cdata.cookedvalue)
+                    }
+                }
+            }
+        }
+    }
+    End{}
+
+}
+
+function Add-PerfDataOld {
 <#
 .Synopsis
    Stores perf data (from get-perfdata) into a hashtable of previously collected data
@@ -187,7 +306,7 @@ function Output-StatusCell {
     End{}
 }
 
-function Output-CurrentPerfTable {
+function Output-CurrentPerfTableOld {
 <#
 .Synopsis
    Reads from hashtable of collected data and writes a web formatted table of
@@ -253,6 +372,70 @@ function Output-CurrentPerfTable {
             #$Output += "<td><span class=""disk1"">$($disk2 -join(","))</span></td>`r`n"
             
             $Output += "</tr>`r`n`r`n"
+        }
+        $Output += "</table>`r`n`r`n"
+        $Output
+    } #end process block
+    End{}
+}
+
+function Output-CurrentPerfTable {
+<#
+.Synopsis
+   Reads from hashtable of collected data and writes a web formatted table of
+   sparklines.
+.DESCRIPTION
+   TBD
+.PARAMETER DataStore
+   The storage hash output from Add-PerfData
+.PARAMETER Path
+   Full path of file (usually a *.html) to output to.
+.EXAMPLE
+   Example of how to use this cmdlet
+
+#>
+
+    [CmdletBinding()]
+    [OutputType([string])]
+    Param
+    (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
+        [Alias("InputObject")][hashtable]$StorageHash
+    )
+
+    Begin {write-verbose "Output-CurrentPerfTable"}
+    Process {
+        
+        [string]$Output = "<table class=""gridtable"">`r`n"
+        $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>`r`n"
+        foreach ($PC in $StorageHash.Keys | Sort ) {
+            write-verbose " $PC"
+            #if no CpuQueue value received, mark computer with black backround, red text
+            if ($($StorageHash.$PC.CpuQueue[-1]) -eq "null") { 
+                $Output += "<tr><td style=""background-color:black""><font color=""red"">$PC</td>`r`n"
+            } else {
+                $Output += "<tr><td>$PC</td>`r`n"
+            }
+            $Output += Output-StatusCell -ComputerName $PC
+            write-verbose "  CpuQueue: $($StorageHash.$PC.CpuQueue)"
+            $Output += "<td><span class=""cpu"">$($StorageHash.$PC.CpuQueue -join(","))</span></td>`r`n"
+            write-verbose "  MemQueue: $($StorageHash.$PC.MemQueue)"
+            $Output += "<td><span class=""mem"">$($StorageHash.$PC.MemQueue -join(","))</span></td>`r`n"
+            write-verbose "  Events: $($StorageHash.$PC.Events)"
+            $Output += "<td><span class=""events"">$($StorageHash.$PC.Events -join(","))</span></td>`r`n"
+            $Output += "<td valign=""bottom"">"
+            foreach ($disk in $StorageHash.$PC.DiskQueue.Keys) {
+                [string]$dq = $($StorageHash.$PC.DiskQueue.$disk -join(","))
+                $diskfree = $($StorageHash.$PC.DiskFree.$disk[-1])
+                [string]$du = 100 - $diskfree
+                $du = $du + ":100"
+                write-verbose "  Disks:"
+                Write-Verbose "    $disk queue $dq  "
+                Write-Verbose "    $disk used $du"
+                $Output += "$disk <span class=""diskused"">$du</span><span class=""disk"">$dq </span>&nbsp"
+            }
+           $Output += "</td>`r`n"
+            
         }
         $Output += "</table>`r`n`r`n"
         $Output
@@ -329,9 +512,9 @@ Help for Param1
 		    width:"100", chartRangeMin:"0", chartRangeMax:"25", chartRangeClip: true } );
 	      $('.mem').sparkline('html', { type: 'line', lineColor:'blue', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"50", chartRangeClip: true } );
-	      $('.disk0').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
+	      $('.events').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
-	      $('.disk1').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
+	      $('.disk').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
           $('.diskused').sparkline('html', { type: 'bar', stackedBarColor:["DarkRed","SeaGreen"], barWidth:"10", 
             zeroAxis:'false', height:"30", chartRangeMin:"0", chartRangeMax:"100"} );
@@ -497,23 +680,12 @@ if (!$StorageHash) {
 foreach ($target in ( $config.targets.keys | sort) ) {    
     #Lipkau's Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. 
     #ignore these!
-    if ($target -notLike "Comment*" ) {
-        write-host $target
-        #read perfcounters to retreive from this target, or use defaults
-        if ($config.$target.counters) {
-            $PerfCounters = $config.$target.counters.split(",")
-        } else {
-            $PerfCounters = $config.defaults.counters.split(",")
-        }
-        write-host $PerfCounters
-        $pdata = Get-PerfData -ComputerName $target -PerfCounters $PerfCounters
-        add-perfdata -StorageHash $StorageHash -Computername $target -PerfData $pdata
-    }
+    if ($target -notLike "Comment*" ) {Get-PerfData -ComputerName $target -StorageHash $StorageHash -Verbose}
 }
-Export-Clixml -InputObject $StorageHash -Path $datafile -Force
+#Export-Clixml -InputObject $StorageHash -Path $datafile -Force
 
 $htmlstring = Output-Pageheader
-$htmlstring += Output-CurrentPerfTable -DataStore $StorageHash
+$htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash -verbose
 $htmlstring += Output-PageFooter
 out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force
 
