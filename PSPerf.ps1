@@ -162,7 +162,11 @@ function Output-StatusCell {
         #[System.DateTime]$changed #timestamp of last time the $up value changed
         $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
         $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
-        $Output += "<br><font size=""1"" color=""green"">$uptime</font></td>`r`n"
+        if ($StorageHash.$ComputerName.down) {
+            $Output += "<br><font size=""1"" color=""red"">$uptime</font></td>`r`n"
+        } else {
+            $Output += "<br><font size=""1"" color=""green"">$uptime</font></td>`r`n"
+        }
         $Output
     }
     End{}
@@ -243,7 +247,7 @@ function Output-CurrentPerfTable {
         foreach ($PC in $StorageHash.Keys | Sort ) {
             write-verbose " $PC"
             #if no CpuQueue value received, mark computer with black backround, red text
-            if ($($StorageHash.$PC.CpuQueue[-1]) -eq "null") { 
+            if ($StorageHash.$PC.down) { 
                 $Output += "<tr><td style=""background-color:black""><font color=""red"">$PC</td>`r`n"
             } else {
                 $Output += "<tr><td>$PC</td>`r`n"
