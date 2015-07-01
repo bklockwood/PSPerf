@@ -162,7 +162,7 @@ function Output-StatusCell {
         #[System.DateTime]$changed #timestamp of last time the $up value changed
         $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
         $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
-        $Output += "<br><font size=""1"" color=""green"">up $uptime</font></td>`r`n"
+        $Output += "<br><font size=""1"" color=""green"">$uptime</font></td>`r`n"
         $Output
     }
     End{}
@@ -190,9 +190,24 @@ Name of computer to retreive uptime from.
             [string]$ComputerName
     )
 
-    $lastboot = (Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $ComputerName).LastBootUpTime
-    $uptime = (Get-Date) - $lastboot
-    [string]$ustring = "$($uptime.days)d:$($uptime.hours)h:$($uptime.minutes)m"
+    $Error.Clear()
+    try {
+        $ErrorActionPreference='Stop'
+        $lastboot = (Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $ComputerName).LastBootUpTime
+        $uptime = (Get-Date) - $lastboot
+        [string]$ustring = "up $($uptime.days)d:$($uptime.hours)h:$($uptime.minutes)m"
+        $storagehash.$ComputerName.Remove("down")
+    } catch {
+        $ustring = "DOWN"
+        #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:1m
+        if ($storagehash.$ComputerName.down) {
+            $downtime = (Get-Date) - ($storagehash.$ComputerName.down)
+            [string]$ustring = "down $($downtime.days)d:$($downtime.hours)h:$($downtime.minutes)m"
+        }else{
+            $storagehash.$ComputerName.Add("down",(Get-Date))
+            [string]$ustring = "down 0d:0h:1m"
+        }
+    }
     $ustring
 }
 
@@ -502,13 +517,9 @@ if (!$StorageHash) {
     }
 }
 
-foreach ($target in ($config.targets.keys | sort) ) {    
-    #Lipkau's Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. 
-    #ignore these!
-    if ($target -notLike "Comment*" ) {
-        Get-PerfData -ComputerName $target -StorageHash $StorageHash 
-        Get-Uptime -ComputerName $target
-    }
+#Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. Ignore these!
+foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
+    Get-PerfData -ComputerName $target -StorageHash $StorageHash 
 }
 Export-Clixml -InputObject $StorageHash -Path $datafile -Force
 
@@ -518,6 +529,6 @@ $htmlstring += Output-PageFooter
 out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force
 
 <# 
-Next steps:
-
+while loop for testing
+$i=1; while ($i -lt 50) {.\PSPerf.ps1; $i++}
 #> 
