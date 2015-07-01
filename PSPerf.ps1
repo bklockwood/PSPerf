@@ -57,16 +57,14 @@ The hash we'll add data to.
             $error.Clear()
             $perfdata = get-counter -ComputerName $comp -counter $PerfCounters -ErrorAction SilentlyContinue
             if ($error) {
-                Write-Verbose "ERROR here we are"
+                Write-Error "ERROR"
                 [void] $StorageHash.$comp.CpuQueue.Add("null")
                 [void] $StorageHash.$comp.MemQueue.Add("null")
                 [void] $StorageHash.$comp.Events.Add("null")
                 foreach ($disk in $disks) {
-                    Write-Verbose "in the disks clause"
                     [void] $StorageHash.$comp.DiskQueue.$disk.Add("null")
                     [void] $StorageHash.$comp.DiskFree.$disk.Add("null")
                 }
-                write-verbose "end of error clause"
             } else {
                 #test whether $perfdata.countersamples.path contains each of the counters we want 
                 #(if not, must write 'null')
@@ -159,14 +157,43 @@ function Output-StatusCell {
         [int]$SecPatch = 0 #security patches outstanding
         [int]$RecPatch = 0 #Recommended patches outstanding
         [int]$OptPatch = 0 #Optional patches outstanding
-        [bool]$up = "$true" #True if server retruns CpuQueue value; false if not
+        [bool]$up = "$true" #True if server returns CpuQueue value; false if not
+        [string]$uptime = Get-Uptime $ComputerName
         #[System.DateTime]$changed #timestamp of last time the $up value changed
         $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
         $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
-        $Output += "<br><font size=""1"" color=""green"">~ ~d:~h:~m</font></td>`r`n"
+        $Output += "<br><font size=""1"" color=""green"">up $uptime</font></td>`r`n"
         $Output
     }
     End{}
+}
+
+function Get-Uptime {
+<#
+.Synopsis
+Retreive uptime from computer.
+.DESCRIPTION
+   TBD
+.PARAMETER Computer
+Name of computer to retreive uptime from.
+
+.EXAMPLE
+   Example of how to use this cmdlet
+
+#>
+
+    [CmdletBinding()]
+    [OutputType([string])]
+    Param (
+            [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
+            [Alias("hostname")]
+            [string]$ComputerName
+    )
+
+    $lastboot = (Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $ComputerName).LastBootUpTime
+    $uptime = (Get-Date) - $lastboot
+    [string]$ustring = "$($uptime.days)d:$($uptime.hours)h:$($uptime.minutes)m"
+    $ustring
 }
 
 function Output-CurrentPerfTable {
@@ -224,7 +251,7 @@ function Output-CurrentPerfTable {
                     $df = 100 - $du
                     [string]$diskused = $df.ToString() + ":" + $du.ToString()
                 } else {
-                    $du = "null"
+                    $diskused = "null"
                 }
                 write-verbose "  Disks:"
                 Write-Verbose "    $disk queue $dq  "
@@ -468,7 +495,7 @@ Function Get-IniContent {
 ## ---------------------------------------Script starts here---------------------------------
 $config = Get-IniContent .\psperf.ini
 if (!$StorageHash) {
-    if (get-item $config.files.datafile -ErrorAction ignore) {
+    if (get-item $datafile -ErrorAction ignore) {
         $StorageHash = Import-Clixml -Path $config.files.datafile
     } else {
         $StorageHash = @{}
@@ -478,9 +505,12 @@ if (!$StorageHash) {
 foreach ($target in ($config.targets.keys | sort) ) {    
     #Lipkau's Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. 
     #ignore these!
-    if ($target -notLike "Comment*" ) {Get-PerfData -ComputerName $target -StorageHash $StorageHash}
+    if ($target -notLike "Comment*" ) {
+        Get-PerfData -ComputerName $target -StorageHash $StorageHash 
+        Get-Uptime -ComputerName $target
+    }
 }
-Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
+Export-Clixml -InputObject $StorageHash -Path $datafile -Force
 
 $htmlstring = Output-Pageheader
 $htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash 
