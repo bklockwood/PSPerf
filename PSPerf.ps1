@@ -53,9 +53,9 @@ The hash we'll add data to.
                     $StorageHash.$comp.DiskFree.$disk = New-Object System.Collections.ArrayList
                 }
             }  
-            write-verbose "disks for $comp - $disks"
             $error.Clear()
             $perfdata = get-counter -ComputerName $comp -counter $PerfCounters -ErrorAction SilentlyContinue
+            #if there's an error collecting perf data, write nulls for all fields
             if ($error) {
                 Write-Error "ERROR"
                 [void] $StorageHash.$comp.CpuQueue.Add("null")
@@ -129,6 +129,53 @@ The hash we'll add data to.
     End{}
 
 }
+
+function Trim-StorageHash {
+<#
+.Synopsis
+Trim or inflate each arraylist element of the storagehash to contain exactly 144 sub-elements
+.DESCRIPTION TBD
+.PARAMETER TBD
+.PARAMETER TBD
+.EXAMPLE
+   Example of how to use this cmdlet
+#>
+
+    [CmdletBinding()]
+
+    Param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("p1")][hashtable]$StorageHash
+    )
+
+    Begin{}
+    Process {
+        #recursively iterate the hashtables and arrays in the $Perfdata hashtable,
+        #and trim arraylists to 144 elements max (maybe inflate them, with nulls, to 144 if under)
+        function recurse ($object, $parent) {
+            foreach ($key in $object.Keys) {
+                if ($object.$key.GetType() -eq [System.Collections.ArrayList]) {
+                    Write-Verbose "StorageHash$($parent).$($key) has $($object.$key.Count) elements"
+                    if ($($object.$key.Count) -gt 144) {
+                        while ($($object.$key.Count) -gt 144) {$object.$key.RemoveAt(0)}
+                        Write-Verbose " ..trimmed to $($object.$key.Count) elements"
+                    }
+                    if ($($object.$key.Count) -lt 144) {
+                        while ($($object.$key.Count) -lt 144) {$object.$key.Insert(0,"null")}
+                        Write-Verbose " ..inflated to $($object.$key.Count) elements"
+                    }
+                }
+                Recurse $object.$key "$($parent).$($Key)"
+            }
+        } 
+
+        recurse $StorageHash
+    } 
+
+    End{}
+}
+
+
+
 
 function Output-StatusCell {
 <#
@@ -514,18 +561,20 @@ Function Get-IniContent {
 ## ---------------------------------------Script starts here---------------------------------
 $config = Get-IniContent .\psperf.ini
 if (!$StorageHash) {
-    if (get-item $datafile -ErrorAction ignore) {
+    if (get-item $config.files.datafile -ErrorAction ignore) {
         $StorageHash = Import-Clixml -Path $config.files.datafile
     } else {
         $StorageHash = @{}
     }
 }
 
+Trim-StorageHash -StorageHash $StorageHash
+
 #Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. Ignore these!
 foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
-    Get-PerfData -ComputerName $target -StorageHash $StorageHash 
+    Get-PerfData -ComputerName $target -StorageHash $StorageHash -Verbose
 }
-Export-Clixml -InputObject $StorageHash -Path $datafile -Force
+Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
 
 $htmlstring = Output-Pageheader
 $htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash 
