@@ -292,7 +292,7 @@ function Output-CurrentPerfTable {
         [string]$Output = "<table class=""gridtable"">`r`n"
         $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>`r`n"
         foreach ($PC in $StorageHash.Keys | Sort ) {
-            write-verbose " $PC"
+            write-verbose " $PC :::::::::::::::::::::::::::::::::::::"
             #if no CpuQueue value received, mark computer with black backround, red text
             if ($StorageHash.$PC.down) { 
                 $Output += "<tr><td style=""background-color:black""><font color=""red"">$PC</td>`r`n"
@@ -315,7 +315,7 @@ function Output-CurrentPerfTable {
                     $du = [math]::Round($du)
                     #$du = $du + ":100"
                     $df = 100 - $du
-                    [string]$diskused = $df.ToString() + ":" + $du.ToString()
+                    [string]$diskused = $du.ToString() + ":" + $df.ToString()
                 } else {
                     $diskused = "null"
                 }
@@ -577,7 +577,7 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
 Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
 
 $htmlstring = Output-Pageheader
-$htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash 
+$htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash -Verbose
 $htmlstring += Output-PageFooter
 out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force
 
