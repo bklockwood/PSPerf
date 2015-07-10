@@ -48,6 +48,7 @@ The hash we'll add data to.
                 $StorageHash.$comp.Events = New-Object System.Collections.ArrayList
                 $storageHash.$comp.Add("DiskQueue",@{})
                 $storageHash.$comp.Add("DiskFree",@{})
+                $StorageHash.$comp.Add("PendingReboot",$false)
                 foreach ($disk in $disks) {
                     $StorageHash.$comp.DiskQueue.$disk = New-Object System.Collections.ArrayList
                     $StorageHash.$comp.DiskFree.$disk = New-Object System.Collections.ArrayList
@@ -130,7 +131,7 @@ The hash we'll add data to.
 
 }
 
-function Trim-StorageHash {
+function Resize-StorageHash {
 <#
 .Synopsis
 Trim or inflate each arraylist element of the storagehash to contain exactly 144 sub-elements
@@ -174,49 +175,44 @@ Trim or inflate each arraylist element of the storagehash to contain exactly 144
     End{}
 }
 
-
-
-
-function Output-StatusCell {
+function Get-RebootStatus {
 <#
 .Synopsis
-   Writes the 'Status' cell of a system's status line
-.DESCRIPTION
-   Long description
-.Parameter ComputerName
-    The computername
+Find out of computer needs a reboot. Returns $true or $false.
+.DESCRIPTION TBD
+.PARAMETER TBD
+.PARAMETER TBD
 .EXAMPLE
    Example of how to use this cmdlet
-.EXAMPLE
-   Another example of how to use this cmdlet
 #>
 
     [CmdletBinding()]
-    [OutputType([int])]
-    Param
-    (
-        [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName=$true,Position=0)]$ComputerName
+
+    Param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("hostname")]$ComputerName,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]$StorageHash
     )
 
-    Begin{}
+    Begin { Write-Verbose "Starting function 'Get-RebootStatus'"}
     Process {
-        [bool]$reb = "$false" #true if server needs reboot
-        [int]$SecPatch = 0 #security patches outstanding
-        [int]$RecPatch = 0 #Recommended patches outstanding
-        [int]$OptPatch = 0 #Optional patches outstanding
-        [bool]$up = "$true" #True if server returns CpuQueue value; false if not
-        [string]$uptime = Get-Uptime $ComputerName
-        #[System.DateTime]$changed #timestamp of last time the $up value changed
-        $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
-        $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
-        if ($StorageHash.$ComputerName.down) {
-            $Output += "<br><font size=""1"" color=""red"">$uptime</font></td>`r`n"
-        } else {
-            $Output += "<br><font size=""1"" color=""green"">$uptime</font></td>`r`n"
+        $scriptblock = {
+            $NeedsReboot = $false
+            $CBS = (Test-Path -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
+            $FRO = (Test-Path -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\FileRenameOperations\NeedsReboot")
+            if ($CBS -or $FRO) {$NeedsReboot = $true}
+            Write-Verbose "CBS $CBS FRO $FRO"
+            $NeedsReboot
         }
-        $Output
-    }
-    End{}
+        $status = invoke-command -ComputerName $Computername -ScriptBlock $scriptblock
+        Write-Verbose "$Computername pending reboot: $status"
+        if ($status) {
+            $StorageHash.$ComputerName.Set_Item("PendingReboot", (Get-Date))
+        } else {
+            $StorageHash.$ComputerName.Set_Item("PendingReboot", $false)
+        }
+    } 
+
+    End { Write-Verbose "End of function 'Get-RebootStatus'"}
 }
 
 function Get-Uptime {
@@ -250,86 +246,63 @@ Name of computer to retreive uptime from.
         $storagehash.$ComputerName.Remove("down")
     } catch {
         $ustring = "DOWN"
-        #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:1m
+        #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:0m
         if ($storagehash.$ComputerName.down) {
             $downtime = (Get-Date) - ($storagehash.$ComputerName.down)
             [string]$ustring = "down $($downtime.days)d:$($downtime.hours)h:$($downtime.minutes)m"
         }else{
             $storagehash.$ComputerName.Add("down",(Get-Date))
-            [string]$ustring = "down 0d:0h:1m"
+            [string]$ustring = "down 0d:0h:0m"
         }
     }
     $ustring
 }
 
-function Output-CurrentPerfTable {
+function Output-StatusCell {
 <#
 .Synopsis
-   Reads from hashtable of collected data and writes a web formatted table of
-   sparklines.
+   Writes the 'Status' cell of a system's status line
 .DESCRIPTION
-   TBD
-.PARAMETER DataStore
-   The storage hash output from Add-PerfData
-.PARAMETER Path
-   Full path of file (usually a *.html) to output to.
+   Long description
+.Parameter ComputerName
+    The computername
 .EXAMPLE
    Example of how to use this cmdlet
-
+.EXAMPLE
+   Another example of how to use this cmdlet
 #>
 
     [CmdletBinding()]
-    [OutputType([string])]
+    [OutputType([int])]
     Param
     (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
-        [Alias("InputObject")][hashtable]$StorageHash
+        [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName=$true,Position=0)]$ComputerName
     )
 
-    Begin {write-verbose "Output-CurrentPerfTable"}
+    Begin{}
     Process {
-        
-        [string]$Output = "<table class=""gridtable"">`r`n"
-        $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>`r`n"
-        foreach ($PC in $StorageHash.Keys | Sort ) {
-            write-verbose " $PC :::::::::::::::::::::::::::::::::::::"
-            #if no CpuQueue value received, mark computer with black backround, red text
-            if ($StorageHash.$PC.down) { 
-                $Output += "<tr><td style=""background-color:black""><font color=""red"">$PC</td>`r`n"
-            } else {
-                $Output += "<tr><td>$PC</td>`r`n"
-            }
-            $Output += Output-StatusCell -ComputerName $PC
-            write-verbose "  CpuQueue: $($StorageHash.$PC.CpuQueue)"
-            $Output += "<td><span class=""cpu"">$($StorageHash.$PC.CpuQueue -join(","))</span></td>`r`n"
-            write-verbose "  MemQueue: $($StorageHash.$PC.MemQueue)"
-            $Output += "<td><span class=""mem"">$($StorageHash.$PC.MemQueue -join(","))</span></td>`r`n"
-            write-verbose "  Events: $($StorageHash.$PC.Events)"
-            $Output += "<td><span class=""events"">$($StorageHash.$PC.Events -join(","))</span></td>`r`n"
-            $Output += "<td valign=""bottom"">"
-            foreach ($disk in $StorageHash.$PC.DiskQueue.Keys) {
-                [string]$dq = $($StorageHash.$PC.DiskQueue.$disk -join(","))
-                if ($($StorageHash.$PC.DiskFree.$disk[-1]) -notlike "null") {
-                    $diskfree = $($StorageHash.$PC.DiskFree.$disk[-1])
-                    $du = 100 - $diskfree
-                    $du = [math]::Round($du)
-                    #$du = $du + ":100"
-                    $df = 100 - $du
-                    [string]$diskused = $du.ToString() + ":" + $df.ToString()
-                } else {
-                    $diskused = "null"
-                }
-                write-verbose "  Disks:"
-                Write-Verbose "    $disk queue $dq  "
-                Write-Verbose "    $disk used $diskused"
-                $Output += "$disk <span class=""diskused"">$diskused</span><span class=""disk"">$dq </span>&nbsp"
-            }
-           $Output += "</td>`r`n"
-            
+        [int]$SecPatch = 0 #security patches outstanding
+        [int]$RecPatch = 0 #Recommended patches outstanding
+        [int]$OptPatch = 0 #Optional patches outstanding
+        [bool]$up = "$true" #True if server returns CpuQueue value; false if not
+        [string]$uptime = Get-Uptime $ComputerName
+        #[System.DateTime]$changed #timestamp of last time the $up value changed
+        #reboot pending?
+        if ($StorageHash.$ComputerName.PendingReboot) {
+            $Output += "<td><font size=""2"" color=""Red"">R </font>"
+        } else {
+            $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
         }
-        $Output += "</table>`r`n`r`n"
+        #Windows Updates outstanding
+        $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
+        #system down?
+        if ($StorageHash.$ComputerName.down) {
+            $Output += "<br><font size=""1"" color=""red"">$uptime</font></td>`r`n"
+        } else {
+            $Output += "<br><font size=""1"" color=""green"">$uptime</font></td>`r`n"
+        }
         $Output
-    } #end process block
+    }
     End{}
 }
 
@@ -421,6 +394,77 @@ Help for Param1
         $Output
     }
 
+    End{}
+}
+
+function Output-CurrentPerfTable {
+<#
+.Synopsis
+   Reads from hashtable of collected data and writes a web formatted table of
+   sparklines.
+.DESCRIPTION
+   TBD
+.PARAMETER DataStore
+   The storage hash output from Add-PerfData
+.PARAMETER Path
+   Full path of file (usually a *.html) to output to.
+.EXAMPLE
+   Example of how to use this cmdlet
+
+#>
+
+    [CmdletBinding()]
+    [OutputType([string])]
+    Param
+    (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
+        [Alias("InputObject")][hashtable]$StorageHash
+    )
+
+    Begin {write-verbose "Output-CurrentPerfTable"}
+    Process {
+        
+        [string]$Output = "<table class=""gridtable"">`r`n"
+        $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>`r`n"
+        foreach ($PC in $StorageHash.Keys | Sort ) {
+            write-verbose " $PC :::::::::::::::::::::::::::::::::::::"
+            #if no CpuQueue value received, mark computer with black backround, red text
+            if ($StorageHash.$PC.down) { 
+                $Output += "<tr><td style=""background-color:black""><font color=""red"">$PC</td>`r`n"
+            } else {
+                $Output += "<tr><td>$PC</td>`r`n"
+            }
+            $Output += Output-StatusCell -ComputerName $PC
+            write-verbose "  CpuQueue: $($StorageHash.$PC.CpuQueue)"
+            $Output += "<td><span class=""cpu"">$($StorageHash.$PC.CpuQueue -join(","))</span></td>`r`n"
+            write-verbose "  MemQueue: $($StorageHash.$PC.MemQueue)"
+            $Output += "<td><span class=""mem"">$($StorageHash.$PC.MemQueue -join(","))</span></td>`r`n"
+            write-verbose "  Events: $($StorageHash.$PC.Events)"
+            $Output += "<td><span class=""events"">$($StorageHash.$PC.Events -join(","))</span></td>`r`n"
+            $Output += "<td valign=""bottom"">"
+            foreach ($disk in $StorageHash.$PC.DiskQueue.Keys) {
+                [string]$dq = $($StorageHash.$PC.DiskQueue.$disk -join(","))
+                if ($($StorageHash.$PC.DiskFree.$disk[-1]) -notlike "null") {
+                    $diskfree = $($StorageHash.$PC.DiskFree.$disk[-1])
+                    $du = 100 - $diskfree
+                    $du = [math]::Round($du)
+                    #$du = $du + ":100"
+                    $df = 100 - $du
+                    [string]$diskused = $du.ToString() + ":" + $df.ToString()
+                } else {
+                    $diskused = "null"
+                }
+                write-verbose "  Disks:"
+                Write-Verbose "    $disk queue $dq  "
+                Write-Verbose "    $disk used $diskused"
+                $Output += "$disk <span class=""diskused"">$diskused</span><span class=""disk"">$dq </span>&nbsp"
+            }
+           $Output += "</td>`r`n"
+            
+        }
+        $Output += "</table>`r`n`r`n"
+        $Output
+    } #end process block
     End{}
 }
 
@@ -568,16 +612,17 @@ if (!$StorageHash) {
     }
 }
 
-Trim-StorageHash -StorageHash $StorageHash
+Resize-StorageHash -StorageHash $StorageHash
 
 #Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. Ignore these!
 foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
-    Get-PerfData -ComputerName $target -StorageHash $StorageHash -Verbose
+    Get-PerfData -ComputerName $target -StorageHash $StorageHash
+    Get-RebootStatus -ComputerName $target -StorageHash $StorageHash
 }
 Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
 
 $htmlstring = Output-Pageheader
-$htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash -Verbose
+$htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash 
 $htmlstring += Output-PageFooter
 out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force
 
