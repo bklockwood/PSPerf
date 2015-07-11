@@ -58,7 +58,7 @@ The hash we'll add data to.
             $perfdata = get-counter -ComputerName $comp -counter $PerfCounters -ErrorAction SilentlyContinue
             #if there's an error collecting perf data, write nulls for all fields
             if ($error) {
-                Write-Error "ERROR"
+                Write-Warning -Message "ERROR in Get-Perfdata" 
                 [void] $StorageHash.$comp.CpuQueue.Add("null")
                 [void] $StorageHash.$comp.MemQueue.Add("null")
                 [void] $StorageHash.$comp.Events.Add("null")
@@ -203,12 +203,38 @@ Find out of computer needs a reboot. Returns $true or $false.
             Write-Verbose "CBS $CBS FRO $FRO"
             $NeedsReboot
         }
-        $status = invoke-command -ComputerName $Computername -ScriptBlock $scriptblock
-        Write-Verbose "$Computername pending reboot: $status"
-        if ($status) {
-            $StorageHash.$ComputerName.Set_Item("PendingReboot", (Get-Date))
-        } else {
-            $StorageHash.$ComputerName.Set_Item("PendingReboot", $false)
+        
+        try {
+            #Invoke-Command can take over two minutes to fail if it cannot connect to target.
+            #So I'm using -asjob to impose a 10 second timeout.
+            $job = invoke-command -ComputerName $Computername -ScriptBlock $scriptblock -ErrorAction Stop -AsJob
+            Wait-Job $job -Timeout 10 |out-null
+            Stop-job $job
+            if ($job.State -eq "Completed") { $status = Receive-Job $job } else { $status = "TIMEOUT"}
+            Remove-Job $job
+        } catch {
+            Write-warning "Error in Get-RebootStatus (catch block, $ComputerName)"
+        }
+
+        switch ($status) {
+            "TIMEOUT" {
+                #will write $false and hope a value is returned on next status check
+                Write-Verbose "::::$ComputerName pendingreboot: NO STATUS RETURNED"
+                $StorageHash.$ComputerName.Set_Item("PendingReboot", $false)
+            }
+            $false {
+                #the $false value is used to make logic easier in Output-StatusCell
+                Write-Verbose "::::$ComputerName pendingreboot: FALSE"
+                $StorageHash.$ComputerName.Set_Item("PendingReboot", $false)
+            }
+            default {
+                Write-Verbose "::::$ComputerName pendingreboot: TRUE, $(Get-Date)"
+                #If there is already a timestamp written, do not overwrite
+                if ($StorageHash.$ComputerName.PendingReboot.GetType() -ne "System.DateTime") {
+                    Write-Verbose "$Computername has needed reboot since $($StorageHash.$ComputerName.PendingReboot)"
+                    $StorageHash.$ComputerName.Set_Item("PendingReboot", (Get-Date))
+                }                
+            }
         }
     } 
 
@@ -388,9 +414,9 @@ Help for Param1
     </script>
     </head>
     <body>
-    <b>Test</b> <hr>
 
-'@
+'@        
+        $Output += "<b>Test at $(get-Date)</b> <hr>"
         $Output
     }
 
@@ -428,7 +454,7 @@ function Output-CurrentPerfTable {
         $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>`r`n"
         foreach ($PC in $StorageHash.Keys | Sort ) {
             write-verbose " $PC :::::::::::::::::::::::::::::::::::::"
-            #if no CpuQueue value received, mark computer with black backround, red text
+            #if Get-Uptime failed to connect, mark computer with black backround, red text
             if ($StorageHash.$PC.down) { 
                 $Output += "<tr><td style=""background-color:black""><font color=""red"">$PC</td>`r`n"
             } else {
@@ -620,7 +646,6 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
     Get-RebootStatus -ComputerName $target -StorageHash $StorageHash
 }
 Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
-
 $htmlstring = Output-Pageheader
 $htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash 
 $htmlstring += Output-PageFooter
@@ -628,5 +653,5 @@ out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF
 
 <# 
 while loop for testing
-$i=1; while ($i -lt 50) {.\PSPerf.ps1; $i++}
+$i=1; while ($i -lt 144) {write-host "iteration $i completed in $(measure-command {.\PSPerf.ps1})"; $i++}
 #> 
