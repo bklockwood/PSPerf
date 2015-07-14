@@ -53,11 +53,24 @@ The hash we'll add data to.
                     $StorageHash.$comp.DiskQueue.$disk = New-Object System.Collections.ArrayList
                     $StorageHash.$comp.DiskFree.$disk = New-Object System.Collections.ArrayList
                 }
-            }  
+            }
+
             $error.Clear()
-            $perfdata = get-counter -ComputerName $comp -counter $PerfCounters -ErrorAction SilentlyContinue
+            #Get-Counter $computername takes a long time to fail if it cannot reach the target system.
+            #Also, it does not take a credential parameter.
+            #So, invoke it on the remote computer via invoke-command with -AsJob
+            #This way the job can be killed if not complete within an arbitrary amount of time. 
+            #See https://goo.gl/zybIEc for a problem I had with icm and get-perfcounter; 
+            #ThomasICG's post (select-expandproperty) solved that issue
+            $sb = {get-counter $Using:PerfCounters| select -ExpandProperty CounterSamples}             
+            $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+            Wait-Job $job -Timeout 10 |out-null
+            Stop-Job $job 
+            if ($job.State -eq "Completed") {$perfdata = Receive-Job $job} else {$perfdata = "TIMEOUT"}
+            Remove-Job $job
+
             #if there's an error collecting perf data, write nulls for all fields
-            if ($error) {
+            if ($error -or ($perfdata -eq "TIMEOUT")) {
                 Write-Warning -Message "ERROR in Get-Perfdata" 
                 [void] $StorageHash.$comp.CpuQueue.Add("null")
                 [void] $StorageHash.$comp.MemQueue.Add("null")
@@ -71,7 +84,7 @@ The hash we'll add data to.
                 #(if not, must write 'null')
 
                 #cpuqueue
-                $cdata=$perfdata.CounterSamples | Where-Object {$_.path -like "*process*"}
+                $cdata=$perfdata | Where-Object {$_.path -like "*process*"}
                 Write-Verbose " $($cdata.Path), $($cdata.CookedValue)"
                 if ($cdata.CookedValue -eq $null) {
                     [void] $StorageHash.$comp.CpuQueue.Add("null")
@@ -80,7 +93,7 @@ The hash we'll add data to.
                 }
 
                 #memqueue
-                $cdata=$perfdata.CounterSamples | Where-Object {$_.path -like "*pages*"}
+                $cdata=$perfdata | Where-Object {$_.path -like "*pages*"}
                 Write-Verbose " $($cdata.Path), $($cdata.CookedValue)"
                 if ($cdata.CookedValue -eq $null) {
                     [void] $StorageHash.$comp.MemQueue.Add("null")
@@ -99,8 +112,7 @@ The hash we'll add data to.
                     if (!$StorageHash.$comp.DiskQueue.$disk) {
                         $StorageHash.$comp.DiskQueue.$disk = New-Object System.Collections.ArrayList
                     }                
-                    $cdata=$perfdata.CounterSamples | 
-                        Where-Object {$_.path -like "*logicaldisk($disk)\avg. disk queue length*"}
+                    $cdata=$perfdata | Where-Object {$_.path -like "*logicaldisk($disk)\avg. disk queue length*"}
                     Write-Verbose "   $($cdata.Path), $($cdata.CookedValue)"
                     if ($cdata.CookedValue -eq $null) {
                         [void] $StorageHash.$comp.DiskQueue.$disk.Add("null")
@@ -115,8 +127,7 @@ The hash we'll add data to.
                     if (!$StorageHash.$comp.DiskFree.$disk) {
                         $StorageHash.$comp.DiskFree.$disk = New-Object System.Collections.ArrayList
                     }                
-                    $cdata=$perfdata.CounterSamples | 
-                        Where-Object {$_.path -like "*logicaldisk($disk)\% free space*"}
+                    $cdata=$perfdata | Where-Object {$_.path -like "*logicaldisk($disk)\% free space*"}
                     Write-Verbose "   $($cdata.Path), $($cdata.CookedValue)"
                     if ($cdata.CookedValue -eq $null) {
                         [void] $StorageHash.$comp.DiskFree.$disk.Add("null")
@@ -127,7 +138,7 @@ The hash we'll add data to.
             }
         }
     }
-    End{}
+    End{ Write-Verbose "Get-PerfCounter done"}
 
 }
 
@@ -642,14 +653,14 @@ Resize-StorageHash -StorageHash $StorageHash
 
 #Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. Ignore these!
 foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
-    Get-PerfData -ComputerName $target -StorageHash $StorageHash
-    Get-RebootStatus -ComputerName $target -StorageHash $StorageHash
+    write-host "$target perfdata: $(measure-command {Get-PerfData -ComputerName $target -StorageHash $StorageHash})"
+    write-host "$target rebootstatus: $(measure-command {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
 }
-Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
-$htmlstring = Output-Pageheader
-$htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash 
-$htmlstring += Output-PageFooter
-out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force
+write-host "export clixml: $(measure-command {Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force})"
+write-host "pageheader: $(measure-command {$htmlstring = Output-Pageheader})"
+write-host "currentperftable: $(measure-command {$htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash })"
+write-host "pagefooter: $(measure-command {$htmlstring += Output-PageFooter})"
+write-host "write html file: $(measure-command {out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force})"
 
 <# 
 while loop for testing
