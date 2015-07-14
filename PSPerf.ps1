@@ -289,20 +289,21 @@ Name of computer to retreive uptime from.
         #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:0m
         #if computer has gone from up to down, DownSince is written and Upsince is removed 
         write-verbose "$ComputerName is DOWN"
+         $StorageHash.$ComputerName.Remove("UpSince")
         if (!$StorageHash.$ComputerName.DownSince) {            
-            $storagehash.$ComputerName.Add("DownSince",(Get-Date))
-            $StorageHash.$ComputerName.Remove("UpSince")
+            $storagehash.$ComputerName.Add("DownSince",(Get-Date))           
         }
     } else {        
         write-verbose "$ComputerName is UP"
+        $StorageHash.$ComputerName.Remove("DownSince")
+        #if computer has gone from down to up, UpSince gets written, and DownSince is removed
+        if (!$StorageHash.$ComputerName.UpSince) {            
+            $StorageHash.$ComputerName.Add("UpSince",$lastboot)
+        }
+
         #make sure UpSince value is correct
         if ($StorageHash.$ComputerName.UpSince -ne $lastboot) {
             $StorageHash.$ComputerName.Set_Item("UPSince",$lastboot)
-        }
-        #if computer has gone from down to up, UpSince gets written, and DownSince is removed
-        if (!$StorageHash.$ComputerName.UpSince) {            
-            $storagehash.$ComputerName.Add("UpSince",$lastboot)
-            $StorageHash.$ComputerName.Remove("DownSince")
         }
 
     }
@@ -680,7 +681,7 @@ write-host "pageheader: $(measure-command {$htmlstring = Output-Pageheader})"
 write-host "currentperftable: $(measure-command {$htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash })"
 write-host "pagefooter: $(measure-command {$htmlstring += Output-PageFooter})"
 write-host "write html file: $(measure-command {out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force})"
-
+$StorageHash
 <# 
 while loop for testing
 $i=1; while ($i -lt 144) {write-warning "iteration $i completed in $(measure-command {.\PSPerf.ps1})"; $i++}
