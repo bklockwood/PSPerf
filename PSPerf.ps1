@@ -39,22 +39,7 @@ The hash we'll add data to.
             } else {
                 $disks = $config.defaults.disks.split(",")
             }
-            #if we haven't polled this computer before, create hashtable locations to store the data
-            if ($StorageHash.keys -notcontains $comp) {
-                Write-verbose " $comp not present in StorageHash, adding"
-                $StorageHash.Add($comp, @{})
-                $StorageHash.$comp.CpuQueue = New-Object System.Collections.ArrayList
-                $StorageHash.$comp.MemQueue = New-Object System.Collections.ArrayList
-                $StorageHash.$comp.Events = New-Object System.Collections.ArrayList
-                $storageHash.$comp.Add("DiskQueue",@{})
-                $storageHash.$comp.Add("DiskFree",@{})
-                $StorageHash.$comp.Add("PendingReboot",$false)
-                foreach ($disk in $disks) {
-                    $StorageHash.$comp.DiskQueue.$disk = New-Object System.Collections.ArrayList
-                    $StorageHash.$comp.DiskFree.$disk = New-Object System.Collections.ArrayList
-                }
-            }
-
+            if ($StorageHash.$ComputerName.DownSince) {break}
             $error.Clear()
             #Get-Counter $computername takes a long time to fail if it cannot reach the target system.
             #Also, it does not take a credential parameter.
@@ -71,7 +56,7 @@ The hash we'll add data to.
 
             #if there's an error collecting perf data, write nulls for all fields
             if ($error -or ($perfdata -eq "TIMEOUT")) {
-                Write-Warning -Message "ERROR in Get-Perfdata" 
+                #Write-Warning -Message "ERROR in Get-Perfdata" 
                 [void] $StorageHash.$comp.CpuQueue.Add("null")
                 [void] $StorageHash.$comp.MemQueue.Add("null")
                 [void] $StorageHash.$comp.Events.Add("null")
@@ -156,7 +141,7 @@ Trim or inflate each arraylist element of the storagehash to contain exactly 144
     [CmdletBinding()]
 
     Param (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("p1")][hashtable]$StorageHash
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][hashtable]$StorageHash
     )
 
     Begin{}
@@ -206,6 +191,7 @@ Find out of computer needs a reboot. Returns $true or $false.
 
     Begin { Write-Verbose "Starting function 'Get-RebootStatus'"}
     Process {
+        if ($StorageHash.$ComputerName.DownSince) {break}
         $scriptblock = {
             $NeedsReboot = $false
             $CBS = (Test-Path -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
@@ -267,32 +253,58 @@ Name of computer to retreive uptime from.
 #>
 
     [CmdletBinding()]
-    [OutputType([string])]
     Param (
-            [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
-            [Alias("hostname")]
-            [string]$ComputerName
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("hostname")]$ComputerName,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]$StorageHash
+
     )
 
-    $Error.Clear()
-    try {
-        $ErrorActionPreference='Stop'
-        $lastboot = (Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $ComputerName).LastBootUpTime
-        $uptime = (Get-Date) - $lastboot
-        [string]$ustring = "up $($uptime.days)d:$($uptime.hours)h:$($uptime.minutes)m"
-        $storagehash.$ComputerName.Remove("down")
-    } catch {
-        $ustring = "DOWN"
-        #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:0m
-        if ($storagehash.$ComputerName.down) {
-            $downtime = (Get-Date) - ($storagehash.$ComputerName.down)
-            [string]$ustring = "down $($downtime.days)d:$($downtime.hours)h:$($downtime.minutes)m"
-        }else{
-            $storagehash.$ComputerName.Add("down",(Get-Date))
-            [string]$ustring = "down 0d:0h:0m"
+    #if we haven't polled this computer before, create hashtable locations to store the data
+    if ($StorageHash.keys -notcontains $Computername) {
+        Write-verbose " $Computername not present in StorageHash, adding"
+        $StorageHash.Add($Computername, @{})
+        $StorageHash.$Computername.CpuQueue = New-Object System.Collections.ArrayList
+        $StorageHash.$Computername.MemQueue = New-Object System.Collections.ArrayList
+        $StorageHash.$Computername.Events = New-Object System.Collections.ArrayList
+        $storageHash.$Computername.Add("DiskQueue",@{})
+        $storageHash.$Computername.Add("DiskFree",@{})
+        $StorageHash.$Computername.Add("PendingReboot",$false)
+        foreach ($disk in $disks) {
+            $StorageHash.$Computername.DiskQueue.$disk = New-Object System.Collections.ArrayList
+            $StorageHash.$Computername.DiskFree.$disk = New-Object System.Collections.ArrayList
         }
     }
-    $ustring
+
+    $Error.Clear()
+    #Get-CimInstance $computername takes a long time to fail if it cannot reach the target system.
+    #So, invoke it on the remote computer via invoke-command with -AsJob
+    #This way the job can be killed if not complete within an arbitrary amount of time. 
+    $sb = {(Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $Using:ComputerName).LastBootUpTime}             
+    $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+    Wait-Job $job -Timeout 10 |out-null
+    Stop-Job $job 
+    if ($job.State -eq "Completed") {$lastboot = Receive-Job $job} else {$lastboot = "TIMEOUT"}
+    Remove-Job $job
+    
+    if ($error -or ($lastboot -eq "TIMEOUT")) {
+        #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:0m
+        #storagehash.computername.DownSince gets written if computer has gone from up to down
+        write-verbose "$ComputerName is DOWN"
+        if (!$StorageHash.$ComputerName.DownSince) {            
+            $storagehash.$ComputerName.Add("DownSince",(Get-Date))
+            $StorageHash.$ComputerName.Remove("UpSince")
+        }
+    } else {
+        #storagehash.computername.UpSince gets written if computer has gone from down to up
+        write-verbose "$ComputerName is UP"
+        if ($StorageHash.$ComputerName.UpSince -ne $lastboot) {$StorageHash.$ComputerName.Set_Item("UPSince",$lastboot)}
+        if (!$StorageHash.$ComputerName.UpSince) {            
+            $storagehash.$ComputerName.Add("UpSince",$lastboot)
+            $StorageHash.$ComputerName.Remove("DownSince")
+        }
+
+    }
+
 }
 
 function Output-StatusCell {
@@ -321,8 +333,6 @@ function Output-StatusCell {
         [int]$SecPatch = 0 #security patches outstanding
         [int]$RecPatch = 0 #Recommended patches outstanding
         [int]$OptPatch = 0 #Optional patches outstanding
-        [bool]$up = "$true" #True if server returns CpuQueue value; false if not
-        [string]$uptime = Get-Uptime $ComputerName
         #[System.DateTime]$changed #timestamp of last time the $up value changed
         #reboot pending?
         if ($StorageHash.$ComputerName.PendingReboot) {
@@ -333,10 +343,14 @@ function Output-StatusCell {
         #Windows Updates outstanding
         $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
         #system down?
-        if ($StorageHash.$ComputerName.down) {
-            $Output += "<br><font size=""1"" color=""red"">$uptime</font></td>`r`n"
+        if ($StorageHash.$ComputerName.DownSince) {
+            $downtime = (Get-Date) - ($storagehash.$ComputerName.DownSince)
+            [string]$down = "down $($downtime.days)d:$($downtime.hours)h:$($downtime.minutes)m"
+            $Output += "<br><font size=""1"" color=""red"">$down</font></td>`r`n"
         } else {
-            $Output += "<br><font size=""1"" color=""green"">$uptime</font></td>`r`n"
+            $uptime = (Get-Date) - ($storagehash.$ComputerName.UpSince)
+            [string]$up = "up $($uptime.days)d:$($uptime.hours)h:$($uptime.minutes)m"
+            $Output += "<br><font size=""1"" color=""green"">$up</font></td>`r`n"
         }
         $Output
     }
@@ -466,7 +480,7 @@ function Output-CurrentPerfTable {
         foreach ($PC in $StorageHash.Keys | Sort ) {
             write-verbose " $PC :::::::::::::::::::::::::::::::::::::"
             #if Get-Uptime failed to connect, mark computer with black backround, red text
-            if ($StorageHash.$PC.down) { 
+            if ($StorageHash.$PC.DownSince) { 
                 $Output += "<tr><td style=""background-color:black""><font color=""red"">$PC</td>`r`n"
             } else {
                 $Output += "<tr><td>$PC</td>`r`n"
@@ -653,6 +667,7 @@ Resize-StorageHash -StorageHash $StorageHash
 
 #Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. Ignore these!
 foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
+    write-host "$target uptime: $(measure-command {Get-Uptime -ComputerName $target -Storagehash $StorageHash -Verbose})"
     write-host "$target perfdata: $(measure-command {Get-PerfData -ComputerName $target -StorageHash $StorageHash})"
     write-host "$target rebootstatus: $(measure-command {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
 }
@@ -664,5 +679,5 @@ write-host "write html file: $(measure-command {out-file -InputObject $htmlstrin
 
 <# 
 while loop for testing
-$i=1; while ($i -lt 144) {write-host "iteration $i completed in $(measure-command {.\PSPerf.ps1})"; $i++}
+$i=1; while ($i -lt 144) {write-warning "iteration $i completed in $(measure-command {.\PSPerf.ps1})"; $i++}
 #> 
