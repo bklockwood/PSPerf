@@ -1,3 +1,142 @@
+function Get-Uptime {
+<#
+.Synopsis
+Retreive uptime from computer.
+.DESCRIPTION
+   TBD
+.PARAMETER Computer
+Name of computer to retreive uptime from.
+
+.EXAMPLE
+   Example of how to use this cmdlet
+
+#>
+
+    [CmdletBinding()]
+    Param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("hostname")]$ComputerName,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]$StorageHash
+
+    )
+
+    #if we haven't polled this computer before, create hashtable locations to store the data
+    if ($StorageHash.keys -notcontains $Computername) {
+        Write-verbose " $Computername not present in StorageHash, adding"
+        $StorageHash.Add($Computername, @{})
+        $StorageHash.$Computername.CpuQueue = New-Object System.Collections.ArrayList
+        $StorageHash.$Computername.MemQueue = New-Object System.Collections.ArrayList
+        $StorageHash.$Computername.Events = New-Object System.Collections.ArrayList
+        $storageHash.$Computername.Add("DiskQueue",@{})
+        $storageHash.$Computername.Add("DiskFree",@{})
+        $StorageHash.$Computername.Add("PendingReboot",$false)
+        foreach ($disk in $disks) {
+            $StorageHash.$Computername.DiskQueue.$disk = New-Object System.Collections.ArrayList
+            $StorageHash.$Computername.DiskFree.$disk = New-Object System.Collections.ArrayList
+        }
+    }
+
+    $Error.Clear()
+    #Get-CimInstance $computername takes a long time to fail if it cannot reach the target system.
+    #So, invoke it on the remote computer via invoke-command with -AsJob
+    #This way the job can be killed if not complete within an arbitrary amount of time. 
+    $sb = {(Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $Using:ComputerName).LastBootUpTime}             
+    $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+    Wait-Job $job -Timeout 10 |out-null
+    Stop-Job $job 
+    if ($job.State -eq "Completed") {$lastboot = Receive-Job $job} else {$lastboot = "TIMEOUT"}
+    Remove-Job $job
+    
+    if ($error -or ($lastboot -eq "TIMEOUT")) {
+        #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:0m
+        #if computer has gone from up to down, DownSince is written and Upsince is removed 
+        write-verbose "$ComputerName is DOWN"
+         $StorageHash.$ComputerName.Remove("UpSince")
+        if (!$StorageHash.$ComputerName.DownSince) {            
+            $storagehash.$ComputerName.Add("DownSince",(Get-Date))           
+        }
+    } else {        
+        write-verbose "$ComputerName is UP"
+        $StorageHash.$ComputerName.Remove("DownSince")
+        #if computer has gone from down to up, UpSince gets written, and DownSince is removed
+        if (!$StorageHash.$ComputerName.UpSince) {            
+            $StorageHash.$ComputerName.Add("UpSince",$lastboot)
+        }
+
+        #make sure UpSince value is correct
+        if ($StorageHash.$ComputerName.UpSince -ne $lastboot) {
+            $StorageHash.$ComputerName.Set_Item("UPSince",$lastboot)
+        }
+
+    }
+
+}
+
+function Get-RebootStatus {
+<#
+.Synopsis
+Find out of computer needs a reboot. Returns $true or $false.
+.DESCRIPTION TBD
+.PARAMETER TBD
+.PARAMETER TBD
+.EXAMPLE
+   Example of how to use this cmdlet
+#>
+
+    [CmdletBinding()]
+
+    Param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("hostname")]$ComputerName,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]$StorageHash
+    )
+
+    Begin { Write-Verbose "Starting function 'Get-RebootStatus'"}
+    Process {
+        $scriptblock = {
+            $NeedsReboot = $false
+            $CBS = (Test-Path -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
+            $FRO = (Test-Path -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\FileRenameOperations\NeedsReboot")
+            if ($CBS -or $FRO) {$NeedsReboot = $true}
+            Write-Verbose "CBS $CBS FRO $FRO"
+            $NeedsReboot
+        }
+        
+        try {
+            #Invoke-Command can take over two minutes to fail if it cannot connect to target.
+            #So I'm using -asjob to impose a 10 second timeout.
+            $job = invoke-command -ComputerName $Computername -ScriptBlock $scriptblock -ErrorAction Stop -AsJob
+            Wait-Job $job -Timeout 10 |out-null
+            Stop-job $job
+            if ($job.State -eq "Completed") { $status = Receive-Job $job } else { $status = "TIMEOUT"}
+            Remove-Job $job
+        } catch {
+            Write-warning "Error in Get-RebootStatus (catch block, $ComputerName)"
+        }
+
+        switch ($status) {
+            "TIMEOUT" {
+                #will write $false and hope a value is returned on next status check
+                Write-Verbose "::::$ComputerName pendingreboot: NO STATUS RETURNED"
+                $StorageHash.$ComputerName.Set_Item("PendingReboot", $false)
+            }
+            $false {
+                #the $false value is used to make logic easier in Output-StatusCell
+                Write-Verbose "::::$ComputerName pendingreboot: FALSE"
+                $StorageHash.$ComputerName.Set_Item("PendingReboot", $false)
+            }
+            default {
+                Write-Verbose "::::$ComputerName pendingreboot: TRUE, $(Get-Date)"
+                #If there is already a timestamp written, do not overwrite
+                if ($StorageHash.$ComputerName.PendingReboot.GetType() -ne "System.DateTime") {
+                    Write-Verbose "$Computername has needed reboot since $($StorageHash.$ComputerName.PendingReboot)"
+                    $StorageHash.$ComputerName.Set_Item("PendingReboot", (Get-Date))
+                }                
+            }
+        }
+    } 
+
+    End { Write-Verbose "End of function 'Get-RebootStatus'"}
+}
+
 function Get-Perfdata {
 <#
 .Synopsis
@@ -125,239 +264,6 @@ The hash we'll add data to.
     }
     End{ Write-Verbose "Get-PerfCounter done"}
 
-}
-
-function Resize-StorageHash {
-<#
-.Synopsis
-Trim or inflate each arraylist element of the storagehash to contain exactly 144 sub-elements
-.DESCRIPTION TBD
-.PARAMETER TBD
-.PARAMETER TBD
-.EXAMPLE
-   Example of how to use this cmdlet
-#>
-
-    [CmdletBinding()]
-
-    Param (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][hashtable]$StorageHash
-    )
-
-    Begin{}
-    Process {
-        #recursively iterate the hashtables and arrays in the $Perfdata hashtable,
-        #and trim arraylists to 144 elements max (maybe inflate them, with nulls, to 144 if under)
-        function recurse ($object, $parent) {
-            foreach ($key in $object.Keys) {
-                if ($object.$key.GetType() -eq [System.Collections.ArrayList]) {
-                    Write-Verbose "StorageHash$($parent).$($key) has $($object.$key.Count) elements"
-                    if ($($object.$key.Count) -gt 144) {
-                        while ($($object.$key.Count) -gt 144) {$object.$key.RemoveAt(0)}
-                        Write-Verbose " ..trimmed to $($object.$key.Count) elements"
-                    }
-                    if ($($object.$key.Count) -lt 144) {
-                        while ($($object.$key.Count) -lt 144) {$object.$key.Insert(0,"null")}
-                        Write-Verbose " ..inflated to $($object.$key.Count) elements"
-                    }
-                }
-                Recurse $object.$key "$($parent).$($Key)"
-            }
-        } 
-
-        recurse $StorageHash
-    } 
-
-    End{}
-}
-
-function Get-RebootStatus {
-<#
-.Synopsis
-Find out of computer needs a reboot. Returns $true or $false.
-.DESCRIPTION TBD
-.PARAMETER TBD
-.PARAMETER TBD
-.EXAMPLE
-   Example of how to use this cmdlet
-#>
-
-    [CmdletBinding()]
-
-    Param (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("hostname")]$ComputerName,
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]$StorageHash
-    )
-
-    Begin { Write-Verbose "Starting function 'Get-RebootStatus'"}
-    Process {
-        $scriptblock = {
-            $NeedsReboot = $false
-            $CBS = (Test-Path -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
-            $FRO = (Test-Path -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\FileRenameOperations\NeedsReboot")
-            if ($CBS -or $FRO) {$NeedsReboot = $true}
-            Write-Verbose "CBS $CBS FRO $FRO"
-            $NeedsReboot
-        }
-        
-        try {
-            #Invoke-Command can take over two minutes to fail if it cannot connect to target.
-            #So I'm using -asjob to impose a 10 second timeout.
-            $job = invoke-command -ComputerName $Computername -ScriptBlock $scriptblock -ErrorAction Stop -AsJob
-            Wait-Job $job -Timeout 10 |out-null
-            Stop-job $job
-            if ($job.State -eq "Completed") { $status = Receive-Job $job } else { $status = "TIMEOUT"}
-            Remove-Job $job
-        } catch {
-            Write-warning "Error in Get-RebootStatus (catch block, $ComputerName)"
-        }
-
-        switch ($status) {
-            "TIMEOUT" {
-                #will write $false and hope a value is returned on next status check
-                Write-Verbose "::::$ComputerName pendingreboot: NO STATUS RETURNED"
-                $StorageHash.$ComputerName.Set_Item("PendingReboot", $false)
-            }
-            $false {
-                #the $false value is used to make logic easier in Output-StatusCell
-                Write-Verbose "::::$ComputerName pendingreboot: FALSE"
-                $StorageHash.$ComputerName.Set_Item("PendingReboot", $false)
-            }
-            default {
-                Write-Verbose "::::$ComputerName pendingreboot: TRUE, $(Get-Date)"
-                #If there is already a timestamp written, do not overwrite
-                if ($StorageHash.$ComputerName.PendingReboot.GetType() -ne "System.DateTime") {
-                    Write-Verbose "$Computername has needed reboot since $($StorageHash.$ComputerName.PendingReboot)"
-                    $StorageHash.$ComputerName.Set_Item("PendingReboot", (Get-Date))
-                }                
-            }
-        }
-    } 
-
-    End { Write-Verbose "End of function 'Get-RebootStatus'"}
-}
-
-function Get-Uptime {
-<#
-.Synopsis
-Retreive uptime from computer.
-.DESCRIPTION
-   TBD
-.PARAMETER Computer
-Name of computer to retreive uptime from.
-
-.EXAMPLE
-   Example of how to use this cmdlet
-
-#>
-
-    [CmdletBinding()]
-    Param (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("hostname")]$ComputerName,
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]$StorageHash
-
-    )
-
-    #if we haven't polled this computer before, create hashtable locations to store the data
-    if ($StorageHash.keys -notcontains $Computername) {
-        Write-verbose " $Computername not present in StorageHash, adding"
-        $StorageHash.Add($Computername, @{})
-        $StorageHash.$Computername.CpuQueue = New-Object System.Collections.ArrayList
-        $StorageHash.$Computername.MemQueue = New-Object System.Collections.ArrayList
-        $StorageHash.$Computername.Events = New-Object System.Collections.ArrayList
-        $storageHash.$Computername.Add("DiskQueue",@{})
-        $storageHash.$Computername.Add("DiskFree",@{})
-        $StorageHash.$Computername.Add("PendingReboot",$false)
-        foreach ($disk in $disks) {
-            $StorageHash.$Computername.DiskQueue.$disk = New-Object System.Collections.ArrayList
-            $StorageHash.$Computername.DiskFree.$disk = New-Object System.Collections.ArrayList
-        }
-    }
-
-    $Error.Clear()
-    #Get-CimInstance $computername takes a long time to fail if it cannot reach the target system.
-    #So, invoke it on the remote computer via invoke-command with -AsJob
-    #This way the job can be killed if not complete within an arbitrary amount of time. 
-    $sb = {(Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $Using:ComputerName).LastBootUpTime}             
-    $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
-    Wait-Job $job -Timeout 10 |out-null
-    Stop-Job $job 
-    if ($job.State -eq "Completed") {$lastboot = Receive-Job $job} else {$lastboot = "TIMEOUT"}
-    Remove-Job $job
-    
-    if ($error -or ($lastboot -eq "TIMEOUT")) {
-        #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:0m
-        #if computer has gone from up to down, DownSince is written and Upsince is removed 
-        write-verbose "$ComputerName is DOWN"
-         $StorageHash.$ComputerName.Remove("UpSince")
-        if (!$StorageHash.$ComputerName.DownSince) {            
-            $storagehash.$ComputerName.Add("DownSince",(Get-Date))           
-        }
-    } else {        
-        write-verbose "$ComputerName is UP"
-        $StorageHash.$ComputerName.Remove("DownSince")
-        #if computer has gone from down to up, UpSince gets written, and DownSince is removed
-        if (!$StorageHash.$ComputerName.UpSince) {            
-            $StorageHash.$ComputerName.Add("UpSince",$lastboot)
-        }
-
-        #make sure UpSince value is correct
-        if ($StorageHash.$ComputerName.UpSince -ne $lastboot) {
-            $StorageHash.$ComputerName.Set_Item("UPSince",$lastboot)
-        }
-
-    }
-
-}
-
-function Output-StatusCell {
-<#
-.Synopsis
-   Writes the 'Status' cell of a system's status line
-.DESCRIPTION
-   Long description
-.Parameter ComputerName
-    The computername
-.EXAMPLE
-   Example of how to use this cmdlet
-.EXAMPLE
-   Another example of how to use this cmdlet
-#>
-
-    [CmdletBinding()]
-    [OutputType([int])]
-    Param
-    (
-        [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName=$true,Position=0)]$ComputerName
-    )
-
-    Begin{}
-    Process {
-        [int]$SecPatch = 0 #security patches outstanding
-        [int]$RecPatch = 0 #Recommended patches outstanding
-        [int]$OptPatch = 0 #Optional patches outstanding
-        #[System.DateTime]$changed #timestamp of last time the $up value changed
-        #reboot pending?
-        if ($StorageHash.$ComputerName.PendingReboot) {
-            $Output += "<td><font size=""2"" color=""Red"">R </font>"
-        } else {
-            $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
-        }
-        #Windows Updates outstanding
-        $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
-        #system down?
-        if ($StorageHash.$ComputerName.DownSince) {
-            $downtime = (Get-Date) - ($storagehash.$ComputerName.DownSince)
-            [string]$down = "down $($downtime.days)d:$($downtime.hours)h:$($downtime.minutes)m"
-            $Output += "<br><font size=""1"" color=""red"">$down</font></td>`r`n"
-        } else {
-            $uptime = (Get-Date) - ($storagehash.$ComputerName.UpSince)
-            [string]$up = "up $($uptime.days)d:$($uptime.hours)h:$($uptime.minutes)m"
-            $Output += "<br><font size=""1"" color=""green"">$up</font></td>`r`n"
-        }
-        $Output
-    }
-    End{}
 }
 
 function Output-Pageheader {
@@ -522,6 +428,56 @@ function Output-CurrentPerfTable {
     End{}
 }
 
+function Output-StatusCell {
+<#
+.Synopsis
+   Writes the 'Status' cell of a system's status line
+.DESCRIPTION
+   Long description
+.Parameter ComputerName
+    The computername
+.EXAMPLE
+   Example of how to use this cmdlet
+.EXAMPLE
+   Another example of how to use this cmdlet
+#>
+
+    [CmdletBinding()]
+    [OutputType([int])]
+    Param
+    (
+        [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName=$true,Position=0)]$ComputerName
+    )
+
+    Begin{}
+    Process {
+        [int]$SecPatch = 0 #security patches outstanding
+        [int]$RecPatch = 0 #Recommended patches outstanding
+        [int]$OptPatch = 0 #Optional patches outstanding
+        #[System.DateTime]$changed #timestamp of last time the $up value changed
+        #reboot pending?
+        if ($StorageHash.$ComputerName.PendingReboot) {
+            $Output += "<td><font size=""2"" color=""Red"">R </font>"
+        } else {
+            $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
+        }
+        #Windows Updates outstanding
+        $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
+        #system down?
+        if ($StorageHash.$ComputerName.DownSince) {
+            $downtime = (Get-Date) - ($storagehash.$ComputerName.DownSince)
+            [string]$down = "down $($downtime.days)d:$($downtime.hours)h:$($downtime.minutes)m"
+            $Output += "<br><font size=""1"" color=""red"">$down</font></td>`r`n"
+        } else {
+            $uptime = (Get-Date) - ($storagehash.$ComputerName.UpSince)
+            [string]$up = "up $($uptime.days)d:$($uptime.hours)h:$($uptime.minutes)m"
+            $Output += "<br><font size=""1"" color=""green"">$up</font></td>`r`n"
+        }
+        $Output
+    }
+    End{}
+}
+
 function Output-PageFooter { 
 <#
 .Synopsis
@@ -549,6 +505,50 @@ Help for Param1
         [string]$Output = "</body>`r`n</html>`r`n"
         $Output
     }
+
+    End{}
+}
+
+function Resize-StorageHash {
+<#
+.Synopsis
+Trim or inflate each arraylist element of the storagehash to contain exactly 144 sub-elements
+.DESCRIPTION TBD
+.PARAMETER TBD
+.PARAMETER TBD
+.EXAMPLE
+   Example of how to use this cmdlet
+#>
+
+    [CmdletBinding()]
+
+    Param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][hashtable]$StorageHash
+    )
+
+    Begin{}
+    Process {
+        #recursively iterate the hashtables and arrays in the $Perfdata hashtable,
+        #and trim arraylists to 144 elements max (maybe inflate them, with nulls, to 144 if under)
+        function recurse ($object, $parent) {
+            foreach ($key in $object.Keys) {
+                if ($object.$key.GetType() -eq [System.Collections.ArrayList]) {
+                    Write-Verbose "StorageHash$($parent).$($key) has $($object.$key.Count) elements"
+                    if ($($object.$key.Count) -gt 144) {
+                        while ($($object.$key.Count) -gt 144) {$object.$key.RemoveAt(0)}
+                        Write-Verbose " ..trimmed to $($object.$key.Count) elements"
+                    }
+                    if ($($object.$key.Count) -lt 144) {
+                        while ($($object.$key.Count) -lt 144) {$object.$key.Insert(0,"null")}
+                        Write-Verbose " ..inflated to $($object.$key.Count) elements"
+                    }
+                }
+                Recurse $object.$key "$($parent).$($Key)"
+            }
+        } 
+
+        recurse $StorageHash
+    } 
 
     End{}
 }
