@@ -39,7 +39,7 @@ The hash we'll add data to.
             } else {
                 $disks = $config.defaults.disks.split(",")
             }
-            if ($StorageHash.$ComputerName.DownSince) {break}
+            
             $error.Clear()
             #Get-Counter $computername takes a long time to fail if it cannot reach the target system.
             #Also, it does not take a credential parameter.
@@ -191,7 +191,6 @@ Find out of computer needs a reboot. Returns $true or $false.
 
     Begin { Write-Verbose "Starting function 'Get-RebootStatus'"}
     Process {
-        if ($StorageHash.$ComputerName.DownSince) {break}
         $scriptblock = {
             $NeedsReboot = $false
             $CBS = (Test-Path -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
@@ -288,16 +287,19 @@ Name of computer to retreive uptime from.
     
     if ($error -or ($lastboot -eq "TIMEOUT")) {
         #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:0m
-        #storagehash.computername.DownSince gets written if computer has gone from up to down
+        #if computer has gone from up to down, DownSince is written and Upsince is removed 
         write-verbose "$ComputerName is DOWN"
         if (!$StorageHash.$ComputerName.DownSince) {            
             $storagehash.$ComputerName.Add("DownSince",(Get-Date))
             $StorageHash.$ComputerName.Remove("UpSince")
         }
-    } else {
-        #storagehash.computername.UpSince gets written if computer has gone from down to up
+    } else {        
         write-verbose "$ComputerName is UP"
-        if ($StorageHash.$ComputerName.UpSince -ne $lastboot) {$StorageHash.$ComputerName.Set_Item("UPSince",$lastboot)}
+        #make sure UpSince value is correct
+        if ($StorageHash.$ComputerName.UpSince -ne $lastboot) {
+            $StorageHash.$ComputerName.Set_Item("UPSince",$lastboot)
+        }
+        #if computer has gone from down to up, UpSince gets written, and DownSince is removed
         if (!$StorageHash.$ComputerName.UpSince) {            
             $storagehash.$ComputerName.Add("UpSince",$lastboot)
             $StorageHash.$ComputerName.Remove("DownSince")
@@ -668,8 +670,10 @@ Resize-StorageHash -StorageHash $StorageHash
 #Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. Ignore these!
 foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
     write-host "$target uptime: $(measure-command {Get-Uptime -ComputerName $target -Storagehash $StorageHash -Verbose})"
-    write-host "$target perfdata: $(measure-command {Get-PerfData -ComputerName $target -StorageHash $StorageHash})"
-    write-host "$target rebootstatus: $(measure-command {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
+    if ($StorageHash.$target.UpSince) {
+        write-host "$target perfdata: $(measure-command {Get-PerfData -ComputerName $target -StorageHash $StorageHash})"
+        write-host "$target rebootstatus: $(measure-command {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
+    }
 }
 write-host "export clixml: $(measure-command {Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force})"
 write-host "pageheader: $(measure-command {$htmlstring = Output-Pageheader})"
