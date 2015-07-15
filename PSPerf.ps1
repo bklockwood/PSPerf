@@ -19,22 +19,6 @@ Name of computer to retreive uptime from.
 
     )
 
-    #if we haven't polled this computer before, create hashtable locations to store the data
-    if ($StorageHash.keys -notcontains $Computername) {
-        Write-verbose " $Computername not present in StorageHash, adding"
-        $StorageHash.Add($Computername, @{})
-        $StorageHash.$Computername.CpuQueue = New-Object System.Collections.ArrayList
-        $StorageHash.$Computername.MemQueue = New-Object System.Collections.ArrayList
-        $StorageHash.$Computername.Events = New-Object System.Collections.ArrayList
-        $storageHash.$Computername.Add("DiskQueue",@{})
-        $storageHash.$Computername.Add("DiskFree",@{})
-        $StorageHash.$Computername.Add("PendingReboot",$false)
-        foreach ($disk in $disks) {
-            $StorageHash.$Computername.DiskQueue.$disk = New-Object System.Collections.ArrayList
-            $StorageHash.$Computername.DiskFree.$disk = New-Object System.Collections.ArrayList
-        }
-    }
-
     $Error.Clear()
     #Get-CimInstance $computername takes a long time to fail if it cannot reach the target system.
     #So, invoke it on the remote computer via invoke-command with -AsJob
@@ -225,11 +209,6 @@ The hash we'll add data to.
                     [void] $StorageHash.$comp.MemQueue.Add($cdata.cookedvalue)
                 }
 
-                #events
-                #placeholder, I have not written the event gatherer yet
-                [void] $StorageHash.$comp.Events.Add("null")
-
-
                 #diskqueue
                 foreach ($disk in $disks) {
                     Write-Verbose "  DiskQueue $disk"
@@ -264,6 +243,114 @@ The hash we'll add data to.
     }
     End{ Write-Verbose "Get-PerfCounter done"}
 
+}
+
+function Get-EventCount {
+<#
+.Synopsis
+Retreive number of Error and Warning events from System and Application logs
+on a Windows host.
+.DESCRIPTION
+TBD
+.PARAMETER ComputerName
+Name of computer to retreive events from.
+.PARAMETER SystemEventIndex
+Retrieves all events from System log *after* this specified index integer
+.PARAMETER ApplicationEventIndex
+Retrieves all events from Application log *after* this specified index integer
+.EXAMPLE
+Example of how to use this cmdlet
+
+#>
+
+    [CmdletBinding()]
+    [OutputType([string])]
+    Param (
+            [Parameter(Mandatory=$true, Position=0)][Alias("hostname")][string]$ComputerName,
+            [Parameter(Mandatory=$true, Position=1)][int]$SystemEventIndex,
+            [Parameter(Mandatory=$true, Position=2)][int]$ApplicationEventIndex
+    )
+
+    try {
+        #Get-Eventlog $computername can take a long time to fail if target system is unreachable.
+        #So, invoke it on the remote computer via invoke-command with -AsJob
+        #This way the job can be killed if not complete within an arbitrary amount of time. 
+        #Additionally this allows a uniform way to supply credentials.
+        $sb = {
+            #custom object contains newest index in log, count of events
+            $syslog = Get-EventLog -LogName System -EntryType Error, Warning | where {$_.Index -gt $Using:SystemEventIndex}
+            $applog = Get-EventLog -LogName Application -EntryType Error, Warning | where {$_.Index -gt $Using:ApplicationEventIndex}
+            $eventcount = $syslog.Count + $applog.Count
+            if ($($syslog.Count) -gt 0) {$sysindex = $syslog[0].Index} else {$sysindex = $Using:SystemEventIndex}
+            if ($($applog.Count) -gt 0) {$appindex = $applog[0].Index} else {$appindex = $Using:ApplicationEventIndex}
+            $result = New-Object -TypeName PSObject
+            Add-Member -InputObject $result -MemberType NoteProperty -Name SystemIndex -Value $sysindex
+            Add-Member -InputObject $result -MemberType NoteProperty -Name ApplicationIndex -Value  $appindex
+            Add-Member -InputObject $result -MemberType NoteProperty -Name EventCount -Value $eventcount
+            $result
+        }             
+        $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+        #on first poll (Index=0), there may be a lot of events; use a longer timeout
+        if ($SystemEventIndex -eq 0) {$timeout = 120} else {$timeout = 30}
+        Wait-Job $job -Timeout $timeout |out-null
+        Stop-Job $job
+        if ($job.State -eq "Completed") {$result = Receive-Job $job} else {$result = "TIMEOUT"}
+        Remove-Job $job 
+        if ($result -ne "TIMEOUT") {
+            write-verbose "$ComputerName newest System event: $($result.SystemIndex)"
+            $StorageHash.$ComputerName.Set_Item("LastSystemEvent", $($result.SystemIndex))
+            write-verbose "$ComputerName newest Application event: $($result.ApplicationIndex)"
+            $StorageHash.$ComputerName.Set_Item("LastApplicationEvent", $($result.ApplicationIndex))
+            write-verbose "$ComputerName Event count: $($result.EventCount)"
+            $StorageHash.$ComputerName.ErrWarnEvents.Add($($result.EventCount))
+            
+        } else {
+            Write-Verbose "$ComputerName Get-EventCount TIMEOUT"
+            $StorageHash.$ComputerName.ErrWarnEvents.Add(0)
+        }
+    } catch {
+        Write-Warning "ERROR in function Get-EventCount $error"
+    }
+    
+}
+
+function New-ComputerRecord {
+<#
+.Synopsis
+Writes a initial record when we start polling a new computer
+.DESCRIPTION
+TBD
+.PARAMETER StorageHash
+The data structure to write to.
+.PARAMETER ComputerName
+Record will be created with this name.
+.EXAMPLE
+TBD
+
+#>
+
+    Param (
+        [Parameter(Mandatory=$true, Position=0)][Alias("hostname")][string]$ComputerName,
+        [Parameter(Mandatory=$true, Position=1)]$StorageHash
+    )
+
+    #if we haven't polled this computer before, create hashtable locations to store the data
+    if ($StorageHash.keys -notcontains $Computername) {
+        Write-verbose " $Computername not present in StorageHash, adding"
+        $StorageHash.Add($Computername, @{})
+        $StorageHash.$Computername.CpuQueue = New-Object System.Collections.ArrayList
+        $StorageHash.$Computername.MemQueue = New-Object System.Collections.ArrayList
+        $storageHash.$Computername.Add("DiskQueue",@{})
+        $storageHash.$Computername.Add("DiskFree",@{})
+        $StorageHash.$Computername.Add("PendingReboot",$false)
+        $StorageHash.$Computername.Add("LastSystemEvent",0)
+        $StorageHash.$ComputerName.Add("LastApplicationEvent",0)
+        $Storagehash.$ComputerName.ErrWarnEvents = New-Object System.Collections.ArrayList
+        foreach ($disk in $disks) {
+            $StorageHash.$Computername.DiskQueue.$disk = New-Object System.Collections.ArrayList
+            $StorageHash.$Computername.DiskFree.$disk = New-Object System.Collections.ArrayList
+        }
+    }
 }
 
 function Output-Pageheader {
@@ -400,7 +487,7 @@ function Output-CurrentPerfTable {
             write-verbose "  MemQueue: $($StorageHash.$PC.MemQueue)"
             $Output += "<td><span class=""mem"">$($StorageHash.$PC.MemQueue -join(","))</span></td>`r`n"
             write-verbose "  Events: $($StorageHash.$PC.Events)"
-            $Output += "<td><span class=""events"">$($StorageHash.$PC.Events -join(","))</span></td>`r`n"
+            $Output += "<td><span class=""events"">$($StorageHash.$PC.ErrWarnEvents -join(","))</span></td>`r`n"
             $Output += "<td valign=""bottom"">"
             foreach ($disk in $StorageHash.$PC.DiskQueue.Keys) {
                 [string]$dq = $($StorageHash.$PC.DiskQueue.$disk -join(","))
@@ -662,6 +749,8 @@ if (!$StorageHash) {
     if (get-item $config.files.datafile -ErrorAction ignore) {
         $StorageHash = Import-Clixml -Path $config.files.datafile
     } else {
+        #So there's no current $StorageHash and no datafile to import. Create empty $storagehash; 
+        #it will be written to datafile at end of script.
         $StorageHash = @{}
     }
 }
@@ -670,18 +759,29 @@ Resize-StorageHash -StorageHash $StorageHash
 
 #Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. Ignore these!
 foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
-    write-host "$target uptime: $(measure-command {Get-Uptime -ComputerName $target -Storagehash $StorageHash -Verbose})"
+    if ($StorageHash.keys -notcontains $target) {New-ComputerRecord -ComputerName $target -StorageHash $StorageHash}
+    write-host "$target get-uptime: $(measure-command `
+        {Get-Uptime -ComputerName $target -Storagehash $StorageHash -Verbose})"
+    
     if ($StorageHash.$target.UpSince) {
-        write-host "$target perfdata: $(measure-command {Get-PerfData -ComputerName $target -StorageHash $StorageHash})"
-        write-host "$target rebootstatus: $(measure-command {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
+        write-host "$target perfdata: $(measure-command `
+            {Get-PerfData -ComputerName $target -StorageHash $StorageHash})"
+        write-host "$target rebootstatus: $(measure-command `
+            {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
+        write-host "$target Get-EventCount: $(Measure-Command `
+            {Get-EventCount -ComputerName $target -SystemEventIndex $StorageHash.$target.LastSystemEvent `
+            -ApplicationEventIndex $StorageHash.$target.LastApplicationEvent -Verbose})"
     }
+
 }
-write-host "export clixml: $(measure-command {Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force})"
-write-host "pageheader: $(measure-command {$htmlstring = Output-Pageheader})"
-write-host "currentperftable: $(measure-command {$htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash })"
-write-host "pagefooter: $(measure-command {$htmlstring += Output-PageFooter})"
-write-host "write html file: $(measure-command {out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force})"
-$StorageHash
+
+write-host "write files: $(measure-command `
+    {Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
+    $htmlstring = Output-Pageheader
+    $htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash
+    $htmlstring += Output-PageFooter
+    out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force})"
+
 <# 
 while loop for testing
 $i=1; while ($i -lt 144) {write-warning "iteration $i completed in $(measure-command {.\PSPerf.ps1})"; $i++}
