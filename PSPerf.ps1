@@ -182,7 +182,6 @@ The hash we'll add data to.
                 #Write-Warning -Message "ERROR in Get-Perfdata" 
                 [void] $StorageHash.$comp.CpuQueue.Add("null")
                 [void] $StorageHash.$comp.MemQueue.Add("null")
-                [void] $StorageHash.$comp.Events.Add("null")
                 foreach ($disk in $disks) {
                     [void] $StorageHash.$comp.DiskQueue.$disk.Add("null")
                     [void] $StorageHash.$comp.DiskFree.$disk.Add("null")
@@ -254,9 +253,9 @@ on a Windows host.
 TBD
 .PARAMETER ComputerName
 Name of computer to retreive events from.
-.PARAMETER SystemEventIndex
+.PARAMETER LastSystemEvent
 Retrieves all events from System log *after* this specified index integer
-.PARAMETER ApplicationEventIndex
+.PARAMETER LastApplicationEvent
 Retrieves all events from Application log *after* this specified index integer
 .EXAMPLE
 Example of how to use this cmdlet
@@ -267,8 +266,8 @@ Example of how to use this cmdlet
     [OutputType([string])]
     Param (
             [Parameter(Mandatory=$true, Position=0)][Alias("hostname")][string]$ComputerName,
-            [Parameter(Mandatory=$true, Position=1)][int]$SystemEventIndex,
-            [Parameter(Mandatory=$true, Position=2)][int]$ApplicationEventIndex
+            [Parameter(Mandatory=$true, Position=1)][datetime]$LastSystemEvent,
+            [Parameter(Mandatory=$true, Position=2)][datetime]$LastApplicationEvent
     )
 
     try {
@@ -277,39 +276,90 @@ Example of how to use this cmdlet
         #This way the job can be killed if not complete within an arbitrary amount of time. 
         #Additionally this allows a uniform way to supply credentials.
         $sb = {
-            #custom object contains newest index in log, count of events
-            $syslog = Get-EventLog -LogName System -EntryType Error, Warning | where {$_.Index -gt $Using:SystemEventIndex}
-            $applog = Get-EventLog -LogName Application -EntryType Error, Warning | where {$_.Index -gt $Using:ApplicationEventIndex}
+            #Create a custom object containing newest timestamp in log, count of events
+            $syslog = Get-EventLog -LogName System -EntryType Error, Warning -After $Using:LastSystemEvent
+            $applog = Get-EventLog -LogName Application -EntryType Error, Warning -After $Using:LastApplicationEvent
             $eventcount = $syslog.Count + $applog.Count
-            if ($($syslog.Count) -gt 0) {$sysindex = $syslog[0].Index} else {$sysindex = $Using:SystemEventIndex}
-            if ($($applog.Count) -gt 0) {$appindex = $applog[0].Index} else {$appindex = $Using:ApplicationEventIndex}
+            if ($($syslog.Count) -gt 0) {$systime = $syslog[0].TimeWritten} else {$systime = $Using:LastSystemEvent}
+            if ($($applog.Count) -gt 0) {$apptime = $applog[0].TimeWritten} else {$apptime = $Using:LastApplicationEvent}
             $result = New-Object -TypeName PSObject
-            Add-Member -InputObject $result -MemberType NoteProperty -Name SystemIndex -Value $sysindex
-            Add-Member -InputObject $result -MemberType NoteProperty -Name ApplicationIndex -Value  $appindex
+            Add-Member -InputObject $result -MemberType NoteProperty -Name SystemNewestEvent -Value $systime
+            Add-Member -InputObject $result -MemberType NoteProperty -Name ApplicationNewestEvent -Value  $apptime
             Add-Member -InputObject $result -MemberType NoteProperty -Name EventCount -Value $eventcount
             $result
         }             
         $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
         #on first poll (Index=0), there may be a lot of events; use a longer timeout
-        if ($SystemEventIndex -eq 0) {$timeout = 120} else {$timeout = 30}
+        if ($LastSystemEvent -eq 0) {$timeout = 120} else {$timeout = 120}
         Wait-Job $job -Timeout $timeout |out-null
         Stop-Job $job
         if ($job.State -eq "Completed") {$result = Receive-Job $job} else {$result = "TIMEOUT"}
         Remove-Job $job 
         if ($result -ne "TIMEOUT") {
-            write-verbose "$ComputerName newest System event: $($result.SystemIndex)"
-            $StorageHash.$ComputerName.Set_Item("LastSystemEvent", $($result.SystemIndex))
-            write-verbose "$ComputerName newest Application event: $($result.ApplicationIndex)"
-            $StorageHash.$ComputerName.Set_Item("LastApplicationEvent", $($result.ApplicationIndex))
+            write-verbose "$ComputerName newest System event: $($result.SystemNewestEvent)"
+            $StorageHash.$ComputerName.Set_Item("LastSystemEvent", $($result.SystemNewestEvent))
+            write-verbose "$ComputerName newest Application event: $($result.ApplicationNewestEvent)"
+            $StorageHash.$ComputerName.Set_Item("LastApplicationEvent", $($result.ApplicationNewestEvent))
             write-verbose "$ComputerName Event count: $($result.EventCount)"
-            $StorageHash.$ComputerName.ErrWarnEvents.Add($($result.EventCount))
-            
+            $StorageHash.$ComputerName.ErrWarnEvents.Add($($result.EventCount)) | out-null
         } else {
             Write-Verbose "$ComputerName Get-EventCount TIMEOUT"
-            $StorageHash.$ComputerName.ErrWarnEvents.Add(0)
+            $StorageHash.$ComputerName.ErrWarnEvents.Add("null") 
         }
     } catch {
         Write-Warning "ERROR in function Get-EventCount $error"
+        $StorageHash.$ComputerName.ErrWarnEvents.Add("null")
+    }
+    
+}
+
+function Get-PendingWU {
+<#
+.Synopsis
+Retreive number of *non-hidden* Windows Updates available but not installed.
+.DESCRIPTION
+TBD
+.PARAMETER ComputerName
+Name of computer to retreive WU count from.
+.PARAMETER StorageHash
+The StorageHash object to store results in.
+.EXAMPLE
+TBD
+
+#>
+    [CmdletBinding()]
+    Param (
+        [Parameter(Mandatory=$true, Position=0)][Alias("hostname")][string]$ComputerName,
+        [Parameter(Mandatory=$true, Position=0)]$StorageHash
+    )
+    try {
+        $sb = {
+            $Criteria = "IsInstalled=0 and IsHidden=0"
+            $Searcher = New-Object -ComObject Microsoft.Update.Searcher
+            $ISearchResult = $Searcher.Search($Criteria)
+            $ISearchResult | select -ExpandProperty Updates
+        }
+        $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+        Wait-Job $job -Timeout 180 #|out-null
+        Stop-Job $job 
+        if ($job.State -eq "Completed") {$result = Receive-Job $job} else {$result = "TIMEOUT"}
+        Remove-Job $job
+        #the $result variable does not get set if zero pending updates
+        if (test-path variable:result) {
+            Write-Verbose "Get-PendingWU $($Computername): $($result.count)"
+            $StorageHash.$ComputerName.Set_Item("PendingWU", $($result.count))
+        } else {
+            if ($result -eq "TIMEOUT") {
+                Write-Verbose "Get-PendingWU $($Computername): $result"
+                $StorageHash.$ComputerName.Set_Item("PendingWU", $result)
+            } else {
+                Write-Verbose "Get-PendingWU $($Computername): 0"
+                $StorageHash.$ComputerName.Set_Item("PendingWU", 0)
+            }
+        }
+    } catch {
+        Write-Warning "ERROR in Get-PendingWU catch block."
+        $StorageHash.$ComputerName.Set_Item("PendingWU","Error")
     }
     
 }
@@ -345,6 +395,7 @@ TBD
         $StorageHash.$Computername.Add("PendingReboot",$false)
         $StorageHash.$Computername.Add("LastSystemEvent",0)
         $StorageHash.$ComputerName.Add("LastApplicationEvent",0)
+        $StorageHash.$Computername.Add("PendingWU",0)
         $Storagehash.$ComputerName.ErrWarnEvents = New-Object System.Collections.ArrayList
         foreach ($disk in $disks) {
             $StorageHash.$Computername.DiskQueue.$disk = New-Object System.Collections.ArrayList
@@ -423,10 +474,9 @@ Help for Param1
 	      $('.mem').sparkline('html', { type: 'line', lineColor:'blue', fillColor:"MistyRose", height:"30", 
 		    width:"100", chartRangeMin:"0", chartRangeMax:"50", chartRangeClip: true } );
 	      $('.events').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
-		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
+		    width:"100", chartRangeMin:"0", chartRangeMax:"15", chartRangeClip: true } );
 	      $('.disk').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
-		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );
-          
+		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );          
           $('.diskused').sparkline('html', { type: 'bar', barWidth:10, stackedBarColor:["DarkRed","SeaGreen"],  
             zeroAxis:'false', width:10, height:"30", chartRangeMin:"0", chartRangeMax:"100"} );
           $('.eventlog').sparkline('html', { type: 'line', lineColor:'SaddleBrown', fillColor:"MistyRose", height:"30", 
@@ -481,12 +531,12 @@ function Output-CurrentPerfTable {
             } else {
                 $Output += "<tr><td>$PC</td>`r`n"
             }
-            $Output += Output-StatusCell -ComputerName $PC
+            $Output += Output-StatusCell -ComputerName $PC -Verbose
             write-verbose "  CpuQueue: $($StorageHash.$PC.CpuQueue)"
             $Output += "<td><span class=""cpu"">$($StorageHash.$PC.CpuQueue -join(","))</span></td>`r`n"
             write-verbose "  MemQueue: $($StorageHash.$PC.MemQueue)"
             $Output += "<td><span class=""mem"">$($StorageHash.$PC.MemQueue -join(","))</span></td>`r`n"
-            write-verbose "  Events: $($StorageHash.$PC.Events)"
+            write-verbose "  Events: $($StorageHash.$PC.ErrWarnEvents)"
             $Output += "<td><span class=""events"">$($StorageHash.$PC.ErrWarnEvents -join(","))</span></td>`r`n"
             $Output += "<td valign=""bottom"">"
             foreach ($disk in $StorageHash.$PC.DiskQueue.Keys) {
@@ -538,9 +588,7 @@ function Output-StatusCell {
 
     Begin{}
     Process {
-        [int]$SecPatch = 0 #security patches outstanding
-        [int]$RecPatch = 0 #Recommended patches outstanding
-        [int]$OptPatch = 0 #Optional patches outstanding
+        [int]$PendingWU = $($StorageHash.$Computername.PendingWU) #Wndows Updates outstanding
         #[System.DateTime]$changed #timestamp of last time the $up value changed
         #reboot pending?
         if ($StorageHash.$ComputerName.PendingReboot) {
@@ -548,8 +596,12 @@ function Output-StatusCell {
         } else {
             $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
         }
+
         #Windows Updates outstanding
-        $Output += "<font size=""1"" color=""LightGray"">P: $SecPatch.s/$RecPatch.r/$OptPatch.o</font>"
+        if ($PendingWU -eq "Error"){$Output += "<font size=""1"" color=""Red"">WU: $PendingWU</font>"}
+        if ($PendingWU -gt 0) {$Output += "<font size=""1"" color=""Red"">WU: $PendingWU</font>"}
+        if ($PendingWU -eq 0){$Output += "<font size=""1"" color=""LightGray"">WU: $PendingWU</font>"}
+        
         #system down?
         if ($StorageHash.$ComputerName.DownSince) {
             $downtime = (Get-Date) - ($storagehash.$ComputerName.DownSince)
@@ -769,8 +821,10 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
         write-host "$target rebootstatus: $(measure-command `
             {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
         write-host "$target Get-EventCount: $(Measure-Command `
-            {Get-EventCount -ComputerName $target -SystemEventIndex $StorageHash.$target.LastSystemEvent `
-            -ApplicationEventIndex $StorageHash.$target.LastApplicationEvent -Verbose})"
+            {Get-EventCount -ComputerName $target -LastSystemEvent $StorageHash.$target.LastSystemEvent `
+            -LastApplicationEvent $StorageHash.$target.LastApplicationEvent -Verbose})"
+        write-host "$target Get-PendingWU: $(Measure-Command `
+            {Get-PendingWU -ComputerName $target -StorageHash $StorageHash})"
     }
 
 }
