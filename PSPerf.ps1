@@ -158,9 +158,9 @@ The hash we'll add data to.
                             '\LogicalDisk(*)\% Free Space'
             #read psperf.ini to find which disks to poll
             if ($config.$comp.disks) {
-                    $disks = $config.$comp.disks.split(",")
+                    $disks = $config.$comp.disks.split(",") | sort
             } else {
-                $disks = $config.defaults.disks.split(",")
+                $disks = $config.defaults.disks.split(",") | sort
             }
             
             $error.Clear()
@@ -404,7 +404,7 @@ TBD
     }
 }
 
-function Output-Pageheader {
+function Output-Page {
 <#
 .Synopsis
    Writes page header
@@ -429,219 +429,185 @@ Help for Param1
 
     Process {
         [string]$Output = @'
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" 
-   "http://www.w3.org/TR/html4/strict.dtd">
-<head>
-    <meta http-equiv="refresh" content="5">    
-	<style type="text/css">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+  <head>
+    <meta content="text/html; charset=UTF-8" http-equiv="content-type">
+    <title>Minimum Test</title>
+    <style type="text/css">
 	    body {
 		    font:  16px Courier New, monospace;
 		    line-height: 15px;
 		    padding: 2em 3em;
+        background-color: White;
 	    }
-	    table.gridtable {
+	    table {
 		    font: italic 18px Consolas;
-		    color:#333333;
+		    color: Gray;
 		    border-width: 1px;
 		    border-color: Gainsboro;
 		    border-collapse: collapse;
+        background-color: White;
 	    }
-	    table.gridtable th {
+	    table th {
 		    font: italic bold 18px Consolas;
 		    text-align: center;
 		    border-width: 1px;
 		    padding: 5px;
 		    border-style: solid;
+        color: Black;
 		    border-color: Gainsboro;
-		    background-color: #dedede;
+		    background-color: Gainsboro;
 	    }
-	    table.gridtable td {
+	    table td {
 		    font: italic bold 14px Consolas;
 		    border-width: 1px;
 		    padding: 5px;
 		    border-style: solid;
 		    border-color: Gainsboro;
-		    background-color: #ffffff;
-	    }
+		    background-color: White;
+        vertical-align: bottom;
     </style>
-
-    <script type="text/javascript" src="jquery-1.11.2.min.js"></script>
+    <script type="text/javascript" src="//cdn.jsdelivr.net/jquery/1.9.1/jquery-1.9.1.min.js"></script>
     <script type="text/javascript" src="jquery.sparkline.min.js"></script>
-    <script type="text/javascript">
-        $(function() {
-	      $('.cpu').sparkline('html', { type: 'line', lineColor:'red', fillColor:"MistyRose", height:"30", 
-		    width:"100", chartRangeMin:"0", chartRangeMax:"25", chartRangeClip: true } );
-	      $('.mem').sparkline('html', { type: 'line', lineColor:'blue', fillColor:"MistyRose", height:"30", 
-		    width:"100", chartRangeMin:"0", chartRangeMax:"50", chartRangeClip: true } );
-	      $('.events').sparkline('html', { type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", 
-		    width:"100", chartRangeMin:"0", chartRangeMax:"15", chartRangeClip: true } );
-	      $('.disk').sparkline('html', { type: 'line', lineColor:'orange', fillColor:"MistyRose", height:"30", 
-		    width:"100", chartRangeMin:"0", chartRangeMax:"5", chartRangeClip: true } );          
-          $('.diskused').sparkline('html', { type: 'bar', barWidth:10, stackedBarColor:["DarkRed","SeaGreen"],  
-            zeroAxis:'false', width:10, height:"30", chartRangeMin:"0", chartRangeMax:"100"} );
-          $('.eventlog').sparkline('html', { type: 'line', lineColor:'SaddleBrown', fillColor:"MistyRose", height:"30", 
-            width:"100", chartRangeMin:"0", chartRangeMax:"10", chartRangeClip: true } )
-        });
-    </script>
-    </head>
-    <body>
-
-'@        
-        $Output += "<b>Test at $(get-Date)</b> <hr>"
-        $Output
-    }
-
-    End{}
-}
-
-function Output-CurrentPerfTable {
-<#
-.Synopsis
-   Reads from hashtable of collected data and writes a web formatted table of
-   sparklines.
-.DESCRIPTION
-   TBD
-.PARAMETER DataStore
-   The storage hash output from Add-PerfData
-.PARAMETER Path
-   Full path of file (usually a *.html) to output to.
-.EXAMPLE
-   Example of how to use this cmdlet
-
-#>
-
-    [CmdletBinding()]
-    [OutputType([string])]
-    Param
-    (
-        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)]
-        [Alias("InputObject")][hashtable]$StorageHash
-    )
-
-    Begin {write-verbose "Output-CurrentPerfTable"}
-    Process {
+    <script type="text/javascript" src="//cdn.jsdelivr.net/momentjs/2.10.3/moment-with-locales.min.js"></script>
+    <script type="text/javascript"> 
+      
+      $(document).ready(function(){
+        //display time of last page refresh
+        moment.locale('en');
+        var now = moment();
+        $('body').append('Test at ' + now.format('YYYY/MM/DD HH:mm:ss'));
         
-        [string]$Output = "<table class=""gridtable"">`r`n"
-        $Output += "<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>`r`n"
-        foreach ($PC in $StorageHash.Keys | Sort ) {
-            write-verbose " $PC :::::::::::::::::::::::::::::::::::::"
-            #if Get-Uptime failed to connect, mark computer with black backround, red text
-            if ($StorageHash.$PC.DownSince) { 
-                $Output += "<tr><td style=""background-color:black""><font color=""red"">$PC</td>`r`n"
-            } else {
-                $Output += "<tr><td>$PC</td>`r`n"
-            }
-            $Output += Output-StatusCell -ComputerName $PC -Verbose
-            write-verbose "  CpuQueue: $($StorageHash.$PC.CpuQueue)"
-            $Output += "<td><span class=""cpu"">$($StorageHash.$PC.CpuQueue -join(","))</span></td>`r`n"
-            write-verbose "  MemQueue: $($StorageHash.$PC.MemQueue)"
-            $Output += "<td><span class=""mem"">$($StorageHash.$PC.MemQueue -join(","))</span></td>`r`n"
-            write-verbose "  Events: $($StorageHash.$PC.ErrWarnEvents)"
-            $Output += "<td><span class=""events"">$($StorageHash.$PC.ErrWarnEvents -join(","))</span></td>`r`n"
-            $Output += "<td valign=""bottom"">"
-            foreach ($disk in $StorageHash.$PC.DiskQueue.Keys) {
-                [string]$dq = $($StorageHash.$PC.DiskQueue.$disk -join(","))
-                if ($($StorageHash.$PC.DiskFree.$disk[-1]) -notlike "null") {
-                    $diskfree = $($StorageHash.$PC.DiskFree.$disk[-1])
-                    $du = 100 - $diskfree
-                    $du = [math]::Round($du)
-                    #$du = $du + ":100"
-                    $df = 100 - $du
-                    [string]$diskused = $du.ToString() + ":" + $df.ToString()
-                } else {
-                    $diskused = "null"
+        $('body').append('<table id="main">');
+        $('#main').append('<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>');
+
+        $.when($.getJSON('psperf.json'), $.getJSON('config.json')).then(function(ret1, ret2) {          
+          var data = ret1[0];
+          var config = ret2[0]; 
+          $.each(config.targets, function(computername, val) {
+            if (computername.slice(0,7) != "Comment") {
+              //the servername cell
+              $('#main').append('<tr id=' + computername + '>' + computername + '</tr>');
+              $('#' + computername).prepend('<td id=' + computername +'cell>' + computername + '</td>'); 
+              
+              //the status cell
+              $('#' + computername).append('<td id=' + computername + 'status>');
+              //status ... pending reboot?
+              if (!Boolean(data[computername].PendingReboot)) {
+                $('#' + computername + 'status').append('<font size="2" color="LightGray">R </font>');
+              } else {
+                $('#' + computername + 'status').append('<font size="2" color="Red">R </font>');
+              };
+              
+              //status ... windows updates outstanding (not yet installed)?
+              if (data[computername].PendingWU > 0) {
+                $('#' + computername + 'status').append('<font size="1" color="Red">WU:' +
+                  data[computername].PendingWU + '</font>');
+              } else {
+                $('#' + computername + 'status').append('<font size="1" color="LightGray">WU:' +
+                  data[computername].PendingWU + '</font>');
+              };
+              
+              //status ... uptime/downtime
+              if ("DownSince" in data[computername]) {
+                event = data[computername].DownSince;
+                udstring ='<br/><font size="1" color="red">down ';
+                $('#' + computername + 'cell').attr("style", "background-color: DarkSalmon; color: Black");
+              } else {
+                event = data[computername].UpSince;
+                udstring = '<br/><font size="1" color="green">up ';
+                $('#' + computername + 'cell').attr("style", "background-color: Aquamarine; color: Black");
+              };
+              //status ... calculate and display the timespan as (example) 1d:2h:3m (1 day, 2 hours, 3 mins)
+              var compevent = moment(event); //time the computer went from up to down or vice versa
+              var timespan = moment(now).diff(compevent, true);
+              var dur = moment.duration(timespan);
+              var formatteduptime = dur.get("days") +"d:"+ dur.get("hours") +"h:"+ dur.get("minutes") + 'm';
+              $('#' + computername + 'status').append(udstring + formatteduptime + '</font>');
+              
+              //the cpu cell
+              $('#' + computername).append('<td id=' + computername + 'cpu>');
+              var cpudata = data[computername].CpuQueue;            
+              var cpuchart = $('<span>Loading</span>');
+              cpuchart.sparkline(cpudata, { type: 'line', lineColor:'red', fillColor:"MistyRose", 
+                height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"25", chartRangeClip: true });
+              $('#' + computername + 'cpu').append(cpuchart);
+              
+              //the memory cell (page-ins per second) 
+              $('#' + computername).append('<td id=' + computername + 'mem>');
+              var memdata = data[computername].MemQueue;            
+              var memchart = $('<span>Loading</span>');
+              memchart.sparkline(memdata, { type: 'line', lineColor:'blue', fillColor:"MistyRose", 
+                height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"50", chartRangeClip: true } );
+              $('#' + computername + 'mem').append(memchart);
+              
+              //the eventlog cell (errors found in system and application logs)
+              $('#' + computername).append('<td id=' + computername + 'events>');
+              var eventdata = data[computername].ErrWarnEvents;            
+              var eventchart = $('<span>Loading</span>');
+              eventchart.sparkline(eventdata, { type: 'line', lineColor:'purple', fillColor:"MistyRose", 
+                height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"15", chartRangeClip: true } );
+              $('#' + computername + 'events').append(eventchart);
+              
+              //the disks cell, iterate through the configured disks
+              $('#' + computername).append('<td id=' + computername + 'disks>');
+              // check to see if per-server disks are configured
+              // !!var returns true if the variable is *not* null or undefined
+              if ((computername in config) && ("disks" in config[computername])) {
+                disks = config[computername].disks;
+              } else {
+                disks = config.defaults.disks
+              }
+              $.each(disks.split(','), function(arrayloc, disklabel) {
+                //display the disk label
+                $('#' + computername + 'disks').append(disklabel + ' ');
+                //retreive the json array of diskfree values
+                var diskfreevals = data[computername].DiskFree[disklabel];
+                //only need the most recent diskfree value
+                var diskfree = diskfreevals[diskfreevals.length - 1];
+                //compute diskfree:diskused barchart values  
+                if (!!diskfree) {                  
+                  var diskused = 100 - diskfree
+                  var dfarray = new Array(diskfree, diskused);
+                  //sparkline wants to see it as an array of arrays
+                  var dfchartval = new Array(dfarray);    
+                  var dfchart = $('<span>Loading</span>');
+                  //configure the sparkline barchart
+                  dfchart.sparkline(dfchartval, { type: 'bar', barWidth:10, stackedBarColor:["DarkRed","SeaGreen"],  
+                      zeroAxis:'false', width:10, height:"30", chartRangeMin:"0", chartRangeMax:"100"} );
+                  //append sparkline barchart to the table cell
+                  $('#' + computername + 'disks').append(dfchart);  
+                  $('#' + computername + 'disks').append(' ');
                 }
-                write-verbose "  Disks:"
-                Write-Verbose "    $disk queue $dq  "
-                Write-Verbose "    $disk used $diskused"
-                $Output += "$disk <span class=""diskused"">$diskused</span><span class=""disk"">$dq </span>&nbsp"
-            }
-           $Output += "</td>`r`n"
-            
-        }
-        $Output += "</table>`r`n`r`n"
-        $Output
-    } #end process block
-    End{}
-}
+                //the diskqueue chart
+                var dqdata = data[computername].DiskQueue[disklabel];
+                if (!!diskfree) {
+                  //$('#' + computername + 'disks').append(dqdata);
+                  var dqchart = $('<span>Loading</span>');
+                  dqchart.sparkline(dqdata, { type: 'line', lineColor:'orange', fillColor:"MistyRose", 
+                    height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"10", chartRangeClip: true });
+                  $('#' + computername + 'disks').append(dqchart);
+                  $('#' + computername + 'disks').append(' ');
+                }
+                
+                
+              });
+              $.sparkline_display_visible();              
+            };
+                        
+          });
+        });
+        setTimeout(function(){window.location.reload();}, 30000)
+      });         
+    </script>
+  </head>
+  <body>    
+  </body>
+</html>
 
-function Output-StatusCell {
-<#
-.Synopsis
-   Writes the 'Status' cell of a system's status line
-.DESCRIPTION
-   Long description
-.Parameter ComputerName
-    The computername
-.EXAMPLE
-   Example of how to use this cmdlet
-.EXAMPLE
-   Another example of how to use this cmdlet
-#>
 
-    [CmdletBinding()]
-    [OutputType([int])]
-    Param
-    (
-        [Parameter(Mandatory=$true,ValueFromPipelineByPropertyName=$true,Position=0)]$ComputerName
-    )
-
-    Begin{}
-    Process {
-        [int]$PendingWU = $($StorageHash.$Computername.PendingWU) #Wndows Updates outstanding
-        #[System.DateTime]$changed #timestamp of last time the $up value changed
-        #reboot pending?
-        if ($StorageHash.$ComputerName.PendingReboot) {
-            $Output += "<td><font size=""2"" color=""Red"">R </font>"
-        } else {
-            $Output += "<td><font size=""2"" color=""LightGray"">R </font>"
-        }
-
-        #Windows Updates outstanding
-        if ($PendingWU -eq "Error"){$Output += "<font size=""1"" color=""Red"">WU: $PendingWU</font>"}
-        if ($PendingWU -gt 0) {$Output += "<font size=""1"" color=""Red"">WU: $PendingWU</font>"}
-        if ($PendingWU -eq 0){$Output += "<font size=""1"" color=""LightGray"">WU: $PendingWU</font>"}
-        
-        #system down?
-        if ($StorageHash.$ComputerName.DownSince) {
-            $downtime = (Get-Date) - ($storagehash.$ComputerName.DownSince)
-            [string]$down = "down $($downtime.days)d:$($downtime.hours)h:$($downtime.minutes)m"
-            $Output += "<br><font size=""1"" color=""red"">$down</font></td>`r`n"
-        } else {
-            $uptime = (Get-Date) - ($storagehash.$ComputerName.UpSince)
-            [string]$up = "up $($uptime.days)d:$($uptime.hours)h:$($uptime.minutes)m"
-            $Output += "<br><font size=""1"" color=""green"">$up</font></td>`r`n"
-        }
-        $Output
-    }
-    End{}
-}
-
-function Output-PageFooter { 
-<#
-.Synopsis
-   Short description
-.DESCRIPTION
-   Long description
-.PARAMETER Param1
-Help for Param1
-.EXAMPLE
-   Example of how to use this cmdlet
-.EXAMPLE
-   Another example of how to use this cmdlet
-#>
-    [CmdletBinding()]
-    [OutputType([string])]
-    Param
-    (
-        #[Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("p1")][string]$Param1,        
-        #[Parameter(Mandatory=$true, ValueFromPipelineByPropertyName=$true, Position=1)][int]$Param2
-    )
-
-    Begin{}
-
-    Process {
-        [string]$Output = "</body>`r`n</html>`r`n"
+'@
         $Output
     }
 
@@ -822,7 +788,7 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
             {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
         write-host "$target Get-EventCount: $(Measure-Command `
             {Get-EventCount -ComputerName $target -LastSystemEvent $StorageHash.$target.LastSystemEvent `
-            -LastApplicationEvent $StorageHash.$target.LastApplicationEvent -Verbose})"
+            -LastApplicationEvent $StorageHash.$target.LastApplicationEvent })"
         write-host "$target Get-PendingWU: $(Measure-Command `
             {Get-PendingWU -ComputerName $target -StorageHash $StorageHash})"
     }
@@ -831,10 +797,10 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
 
 write-host "write files: $(measure-command `
     {Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
-    $htmlstring = Output-Pageheader
-    $htmlstring += Output-CurrentPerfTable -StorageHash $StorageHash
-    $htmlstring += Output-PageFooter
+    $htmlstring = Output-Page
     out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force})"
+    ConvertTo-Json -InputObject $StorageHash -Depth 10 | out-file C:\nginx\nginx-1.9.3\html\psperf.json -Force
+    ConvertTo-Json -InputObject $config -Depth 10 | out-file C:\nginx\nginx-1.9.3\html\config.json -Force
 
 <# 
 while loop for testing
