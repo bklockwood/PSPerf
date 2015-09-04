@@ -158,7 +158,7 @@ The hash we'll add data to.
                             '\LogicalDisk(*)\% Free Space'
             #read psperf.ini to find which disks to poll
             if ($config.$comp.disks) {
-                    $disks = $config.$comp.disks.split(",") | sort
+                $disks = $config.$comp.disks.split(",") | sort
             } else {
                 $disks = $config.defaults.disks.split(",") | sort
             }
@@ -171,7 +171,7 @@ The hash we'll add data to.
             #See https://goo.gl/zybIEc for a problem I had with icm and get-perfcounter; 
             #ThomasICG's post (select-expandproperty) solved that issue
             $sb = {get-counter $Using:PerfCounters| select -ExpandProperty CounterSamples}             
-            $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+            $job = invoke-command -Computername $comp -ScriptBlock $sb -AsJob
             Wait-Job $job -Timeout 10 |out-null
             Stop-Job $job 
             if ($job.State -eq "Completed") {$perfdata = Receive-Job $job} else {$perfdata = "TIMEOUT"}
@@ -182,7 +182,7 @@ The hash we'll add data to.
                 #Write-Warning -Message "ERROR in Get-Perfdata" 
                 [void] $StorageHash.$comp.CpuQueue.Add("null")
                 [void] $StorageHash.$comp.MemQueue.Add("null")
-                foreach ($disk in $disks) {
+                foreach ($disk in $disks) {                    
                     [void] $StorageHash.$comp.DiskQueue.$disk.Add("null")
                     [void] $StorageHash.$comp.DiskFree.$disk.Add("null")
                 }
@@ -397,6 +397,11 @@ TBD
         $StorageHash.$ComputerName.Add("LastApplicationEvent",0)
         $StorageHash.$Computername.Add("PendingWU",0)
         $Storagehash.$ComputerName.ErrWarnEvents = New-Object System.Collections.ArrayList
+        if ($config.$ComputerName.disks) {
+            $disks = $config.$ComputerName.disks.split(",") | sort
+        } else {
+            $disks = $config.defaults.disks.split(",") | sort
+        }
         foreach ($disk in $disks) {
             $StorageHash.$Computername.DiskQueue.$disk = New-Object System.Collections.ArrayList
             $StorageHash.$Computername.DiskFree.$disk = New-Object System.Collections.ArrayList
@@ -485,7 +490,6 @@ Help for Param1
         $.when($.getJSON('psperf.json'), $.getJSON('config.json')).then(function(ret1, ret2) {          
           var data = ret1[0];
           var config = ret2[0];
-          var up=true;
           $.each(config.targets, function(computername, val) { 
             if (computername.slice(0,7) != "Comment") { 
               //the servername cell
@@ -518,13 +522,11 @@ Help for Param1
               //status ... uptime/downtime
               if ("DownSince" in data[computername]) {
                 event = data[computername].DownSince;
-                up=false;
                 udstring ='<br/><font size="1" color="red">down ';
                 $('#' + computername + 'cell').attr("style", "background-color: DarkSalmon; color: Black");
               } else {
                 event = data[computername].UpSince;
                 udstring = '<br/><font size="1" color="green">up ';
-                up=true;
                 $('#' + computername + 'cell').attr("style", "background-color: Aquamarine; color: Black");
               }
               //status ... calc and display the timespan as (eg) 1d:2h:3m (1 day, 2 hours, 3 mins)
@@ -534,7 +536,7 @@ Help for Param1
               var formatteduptime = dur.get("days") +"d:"+ dur.get("hours") +"h:" + dur.get("minutes") + 'm';
               $('#' + computername + 'status').append(udstring + formatteduptime + '</font>');
               
-              if (up==true) {
+             
                 
               //the cpu cell                
                 var cpudata = data[computername].CpuQueue;            
@@ -603,7 +605,7 @@ Help for Param1
                   }  
                 }); //end of $.each(disks.split..
                 $.sparkline_display_visible();              
-              }
+              
             }           
           });
         });
@@ -615,8 +617,6 @@ Help for Param1
     
   </body>
 </html>
-
-
 
 '@
         $Output
@@ -791,10 +791,11 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
     if ($StorageHash.keys -notcontains $target) {New-ComputerRecord -ComputerName $target -StorageHash $StorageHash}
     write-host "$target get-uptime: $(measure-command `
         {Get-Uptime -ComputerName $target -Storagehash $StorageHash -Verbose})"
+    write-host "$target perfdata: $(measure-command `
+        {Get-PerfData -ComputerName $target -StorageHash $StorageHash})"
     
     if ($StorageHash.$target.UpSince) {
-        write-host "$target perfdata: $(measure-command `
-            {Get-PerfData -ComputerName $target -StorageHash $StorageHash})"
+        
         write-host "$target rebootstatus: $(measure-command `
             {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
         write-host "$target Get-EventCount: $(Measure-Command `
