@@ -580,13 +580,13 @@ Help for Param1
                   //compute diskfree:diskused barchart values  
                   if (!!diskfree) {                  
                     var diskused = 100 - diskfree
-                    var dfarray = new Array(diskfree, diskused);
+                    var dfarray = new Array(diskused, diskfree);
                     //sparkline wants to see it as an array of arrays
                     var dfchartval = new Array(dfarray);    
                     var dfchart = $('<span>Loading</span>');
                     //configure the sparkline barchart
                     dfchart.sparkline(dfchartval, { type: 'bar', barWidth:10, 
-                        stackedBarColor:["DarkRed","SeaGreen"], zeroAxis:'false', width:10, 
+                        stackedBarColor:["DarkRed", "SeaGreen"], zeroAxis:'false', width:10, 
                         height:"30", chartRangeMin:"0", chartRangeMax:"100"} );
                     //append sparkline barchart to the table cell
                     $('#' + computername + 'disks').append(dfchart);  
