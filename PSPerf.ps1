@@ -340,7 +340,7 @@ TBD
             $ISearchResult | select -ExpandProperty Updates
         }
         $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
-        Wait-Job $job -Timeout 180 #|out-null
+        Wait-Job $job -Timeout 30 #|out-null
         Stop-Job $job 
         if ($job.State -eq "Completed") {$result = Receive-Job $job} else {$result = "TIMEOUT"}
         Remove-Job $job
@@ -393,8 +393,8 @@ TBD
         $storageHash.$Computername.Add("DiskQueue",@{})
         $storageHash.$Computername.Add("DiskFree",@{})
         $StorageHash.$Computername.Add("PendingReboot",$false)
-        $StorageHash.$Computername.Add("LastSystemEvent",0)
-        $StorageHash.$ComputerName.Add("LastApplicationEvent",0)
+        $StorageHash.$Computername.Add("LastSystemEvent",([DateTime]::Now.AddHours(-1)))
+        $StorageHash.$ComputerName.Add("LastApplicationEvent",([DateTime]::Now.AddHours(-1)))
         $StorageHash.$Computername.Add("PendingWU",0)
         $Storagehash.$ComputerName.ErrWarnEvents = New-Object System.Collections.ArrayList
         if ($config.$ComputerName.disks) {
@@ -523,7 +523,7 @@ Help for Param1
               if ("DownSince" in data[computername]) {
                 event = data[computername].DownSince;
                 udstring ='<br/><font size="1" color="red">down ';
-                $('#' + computername + 'cell').attr("style", "background-color: DarkSalmon; color: Black");
+                $('#' + computername + 'cell').attr("style", "background-color: Black; color: Red");
               } else {
                 event = data[computername].UpSince;
                 udstring = '<br/><font size="1" color="green">up ';
@@ -542,7 +542,7 @@ Help for Param1
                 var cpudata = data[computername].CpuQueue;            
                 var cpuchart = $('<span>Loading</span>');
                 cpuchart.sparkline(cpudata, { type: 'line', lineColor:'red', fillColor:"MistyRose", 
-                  height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"25", 
+                  height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"15", 
                   chartRangeClip: true });
                 $('#' + computername + 'cpu').append(cpuchart);
               
@@ -550,7 +550,7 @@ Help for Param1
                 var memdata = data[computername].MemQueue;            
                 var memchart = $('<span>Loading</span>');
                 memchart.sparkline(memdata, { type: 'line', lineColor:'blue', fillColor:"MistyRose", 
-                  height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"50", 
+                  height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"100", 
                   chartRangeClip: true } );
                 $('#' + computername + 'mem').append(memchart);
               
