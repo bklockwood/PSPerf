@@ -810,9 +810,12 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
 write-host "write files: $(measure-command `
     {Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
     $htmlstring = Output-Page
-    out-file -InputObject $htmlstring -FilePath $config.files.htmlfile -Encoding UTF8 -Force})"
-    ConvertTo-Json -InputObject $StorageHash -Depth 10 | out-file C:\nginx\nginx-1.9.3\html\psperf.json -Force
-    ConvertTo-Json -InputObject $config -Depth 10 | out-file C:\nginx\nginx-1.9.3\html\config.json -Force
+    $webpage = "$($config.files.webdir)\$($config.files.pagename)"
+    $jsondata = "$($config.files.webdir)\psperf.json"
+    $jsonconfig = "$($config.files.webdir)\config.json"
+    out-file -InputObject $htmlstring -FilePath $webpage -Encoding UTF8 -Force})"
+    ConvertTo-Json -InputObject $StorageHash -Depth 10 | out-file $jsondata -Force
+    ConvertTo-Json -InputObject $config -Depth 10 | out-file $jsonconfig -Force
 
 <# 
 while loop for testing
