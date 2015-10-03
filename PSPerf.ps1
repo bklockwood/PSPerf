@@ -478,18 +478,23 @@ Help for Param1
     <script type="text/javascript" src="//cdn.jsdelivr.net/momentjs/2.10.3/moment-with-locales.min.js"></script>
     <script type="text/javascript"> 
       
-      $(document).ready(function(){
-        //display time of last page refresh
-        moment.locale('en');
-        var now = moment();
-        $('body').append('Test at ' + now.format('YYYY/MM/DD HH:mm:ss'));
-        
-        $('body').append('<table id="main">');
-        $('#main').append('<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>');
+      $(document).ready(function(){  
 
         $.when($.getJSON('psperf.json'), $.getJSON('config.json')).then(function(ret1, ret2) {          
           var data = ret1[0];
           var config = ret2[0];
+
+          //display time of last data refresh
+          moment.locale('en');
+          var now = moment();
+          //$('body').append('Page Refreshed: ' + now.format('YYYY/MM/DD HH:mm:ss') + '<br/>');
+          var DataRefreshed = moment(data.PSPerf.LastDataWritten).format("YYYY/MM/DD hh:mm:ss");
+          var DataAge = moment(data.PSPerf.LastDataWritten).fromNow()
+          $('body').append('Data Refreshed: ' + DataRefreshed + ' (' + DataAge + ')');
+
+          //write the table
+          $('body').append('<table id="main">');
+          $('#main').append('<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>');
           $.each(config.targets, function(computername, val) { 
             if (computername.slice(0,7) != "Comment") { 
               //the servername cell
@@ -535,8 +540,6 @@ Help for Param1
               var dur = moment.duration(timespan);
               var formatteduptime = dur.get("days") +"d:"+ dur.get("hours") +"h:" + dur.get("minutes") + 'm';
               $('#' + computername + 'status').append(udstring + formatteduptime + '</font>');
-              
-             
                 
               //the cpu cell                
                 var cpudata = data[computername].CpuQueue;            
@@ -606,9 +609,10 @@ Help for Param1
                 }); //end of $.each(disks.split..
                 $.sparkline_display_visible();              
               
-            }           
-          });
+            }
+          }); // end of $.each(config.targets, blah)
         });
+        
         setTimeout(function(){window.location.reload();}, 30000)
       });         
     </script>
@@ -774,6 +778,9 @@ Function Get-IniContent {
 
 ## ---------------------------------------Script starts here---------------------------------
 $config = Get-IniContent .\psperf.ini
+$webpage = "$($config.files.webdir)\$($config.files.pagename)"
+$jsondata = "$($config.files.webdir)\psperf.json"
+$jsonconfig = "$($config.files.webdir)\config.json"
 if (!$StorageHash) {
     if (get-item $config.files.datafile -ErrorAction ignore) {
         $StorageHash = Import-Clixml -Path $config.files.datafile
@@ -807,13 +814,16 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
 
 }
 
+if ($StorageHash.keys -notcontains "PSPerf") {
+    $StorageHash.Add("PSPerf", @{})
+}
+$StorageHash.PSPerf.Set_Item("LastDataWritten", ([DateTime]::Now))
+
 write-host "write files: $(measure-command `
     {Export-Clixml -InputObject $StorageHash -Path $config.files.datafile -Force
     $htmlstring = Output-Page
-    $webpage = "$($config.files.webdir)\$($config.files.pagename)"
-    $jsondata = "$($config.files.webdir)\psperf.json"
-    $jsonconfig = "$($config.files.webdir)\config.json"
     out-file -InputObject $htmlstring -FilePath $webpage -Encoding UTF8 -Force})"
+
     ConvertTo-Json -InputObject $StorageHash -Depth 10 | out-file $jsondata -Force
     ConvertTo-Json -InputObject $config -Depth 10 | out-file $jsonconfig -Force
 
