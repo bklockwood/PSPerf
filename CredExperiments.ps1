@@ -63,10 +63,18 @@ function Test-PsRemoting {
 <#
 .SYNOPSIS
 Tests whether PSRemoting to target computer is possible.
+Helps troubleshoot PSRemoting failures by breaking down 
+possible causes.
+.DESCRIPTION
+TBD
 .PARAMETER Computername
 Name of computer to test PSRemoting with.
 .PARAMETER Credential
 A PSCredential valid to the specified computer.
+.PARAMETER Details
+Perform detailed checks and show results.
+If this parameter is omitted, the cmdlet returns only 
+a boolean (true/false)value.
 .NOTES
 I have expanded on Lee Holmes' example at http://goo.gl/80QT23
 Logic:
@@ -74,8 +82,8 @@ Logic:
    +If FAIL:
     -Check and report whether localhost allows PSRemoting
     -Check and report whether $Computername is in TrustedHosts
-    -Check and report whether $Computername is reachable on network
-    -Check and report whether $Computername allows PSRemoting TODO
+    -Check and report whether $Computername is pingable on network
+    -Check and report whether $Computername allows PSRemoting 
     -Check and report whether creds are valid on $Computername TODO
    +If SUCCESS:
     -Report $true
@@ -83,29 +91,29 @@ Logic:
 PS> Test-PsRemoting -Computername ad1 -Credential $cred
 True
 .EXAMPLE
-PS> Test-PsRemoting -Computername FAKENAME -Credential $cred -Verbose
-WARNING: Could not connect to FAKENAME
-VERBOSE: [FAKENAME] Connecting to remote server FAKENAME failed with the following error message : The WinRM client cannot proce
-ss the request. If the authentication scheme is different from Kerberos, or if the client computer is not joined to a domain, th
-en HTTPS transport must be used or the destination machine must be added to the TrustedHosts configuration setting. Use winrm.cm
-d to configure TrustedHosts. Note that computers in the TrustedHosts list might not be authenticated. You can get more informati
-on about that by running the following command: winrm help config. For more information, see the about_Remote_Troubleshooting He
-lp topic.
-VERBOSE: PSRemoting is enabled locally
-VERBOSE: FAKENAME is NOT in TrustedHosts
-VERBOSE: Testing connection to computer 'FAKENAME' failed: No such host is known
+PS> Test-PsRemoting -Computername ad1 -Details
+Checking whether PSRemoting is enabled locally ...ENABLED (good).
+Looking for ad1 in TrustedHosts ... FOUND (good).
+Testing ping to ad1 ... SUCCESS (good).
+Testing connection to ad1 WSMAN port ... OPEN (good).
+PSRemoting to ad1 ...FAIL (bad)
+[ad1] Connecting to remote server ad1 failed with the following error message : 
+Access is denied. For more information, see the about_Remote_Troubleshooting 
+Help topic.
 #>
     [CmdletBinding()]
     param( 
         [Parameter(Mandatory = $true, Position=0)]$Computername,
-        [Parameter(Position=1)][PSCredential]$Credential
+        [Parameter(Position=1)][PSCredential]$Credential,
+        [Parameter(Position=2)][switch]$Details
     )
 
-    #if the verbose switch is on, do all these detailed checks
-    if ($VerbosePreference -ne "SilentlyContinue") {
+    #if the Details switch is on, do all these detailed checks to 
+    #help narrow down the cause of PSRemoting failures
+    if ($Details) {
     
         #Report whether we can PSRemote to localhost
-        Write-Host "Checking whether PSRemoting is enabled locally ..." -NoNewline
+        Write-Host "Checking whether PSRemoting is enabled locally ... " -NoNewline
         $psremotingenabled = $true
         try {
             $ErrorActionPreference = "Stop"
@@ -121,45 +129,54 @@ VERBOSE: Testing connection to computer 'FAKENAME' failed: No such host is known
 
         #Report whether remote computer is in TrustedHosts
         Write-Host "Looking for $Computername in TrustedHosts ... " -NoNewline
-        if ((get-item WSMan:\localhost\Client\TrustedHosts).Value -contains $Computername) {
-            THIS IS BUSTED, the Value is not an array/collection
+        $trustedhosts = (get-item WSMan:\localhost\Client\TrustedHosts).Value
+        $trustedhosts = $trustedhosts -split(',')
+        if ($trustedhosts -contains $Computername) {
             Write-Host "FOUND (good)."
         } else {
             Write-Host "NOT FOUND (bad)."
         }
 
         #Report whether remote computer is pingable
+        #Should get IP another way, a system may have ping filtered while allowing WSMAN
         Write-Host "Testing ping to $Computername ... " -NoNewline
-        $reachable = $true
+        $pingable = $true
         try {
             $ErrorActionPreference = "Stop"
             $pingresult = test-connection -ComputerName $Computername -Count 1 
+            $ip = $pingresult.IPV4Address.IPAddressToString
         } catch {
             Write-Host "FAIL (bad)."
-            $reachable = $false
-        }
-        if ($reachable) {Write-Host "SUCCESS (good)."}
+            $pingable = $false
+        }        
+        if ($pingable) {Write-Host "SUCCESS (good)."}
     
         #Report whether WSMAN port 5985 is open
-        if ($reachable) {
-            $ip = $pingresult.IPV4Address.IPAddressToString
-            Write-Host "Testing connection to $Computername WSMAN port ... " -NoNewline
-            try {
-                $socket = new-object System.Net.Sockets.TcpClient($ip, 5985)
+        if ($pingable) {
+            if (Test-Path Variable:socket) {Remove-Variable socket; write-host "removed"}
+            Write-Host "Testing connection to $Computername WSMAN port ... " -NoNewline        
+            try {            
+                $socket = New-Object System.Net.Sockets.TcpClient
+                $socket.SendTimeout = 1000
+                $socket.ReceiveTimeout = 1000      
+                $socket.BeginConnect($ip, 5985, $null, $null) | Out-Null            
             } catch {
-                Write-Host "ERROR (bad)."
-            }
-            if ($socket.Connected) {
-                Write-Host "OPEN (good)."
-                $socket.close()
-            } else {
-                Write-Host "CLOSED (bad)."
+                Write-Host "ERROR, FAIL (bad)."
+                Write-Host $_
+            } 
+            start-sleep -Milliseconds 500         
+            if ($socket.Connected -eq $true) {
+                Write-Host "SUCCESS (good)."
                 $socket.Close()
+            } else {
+                Write-Host "FAIL (bad)."
             }
-        }
-     } #end "if ($VerbosePreference -neq "SilentlyContinue")"
+        } #end "if ($pingable)"
+        
+     } #end "if ($Details)"
 
     #Now actually try a PSRemoting connection
+    if ($Details) {Write-Host "PSRemoting to $Computername ..." -NoNewline}
     try { 
         $ErrorActionPreference = "Stop"
         if ($Credential) {
@@ -172,11 +189,14 @@ VERBOSE: Testing connection to computer 'FAKENAME' failed: No such host is known
     } 
     
     if ($icmresult -eq 1) {
-        return $true 
-    } else {
-        Write-Warning "Could not connect to $Computername"
-        Write-Host "$icmresult"
-        return $false
+        if (!$Details) {return $true}
+        else {Write-Host "SUCCESS (good)"}
+    } else {        
+        if (!$Details) {return $false}
+        else {
+            Write-Host "FAIL (bad)"
+            Write-Host "$icmresult"
+        }
     }
 }
 
