@@ -1,3 +1,38 @@
+function Get-Data {
+<#
+.Synopsis
+Wrapper function calls Get-Uptime, Get-Perfdata, Get-RebootStatus, 
+Get-EventCount, and Get-PendingWU
+.DESCRIPTION
+TBD
+.PARAMETER Computer
+Name of computer to retreive uptime from.
+.PARAMETER StorageHash
+The storage hash to write to
+.EXAMPLE
+TBD
+
+#>
+
+    [CmdletBinding()]
+    Param (
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("hostname")]$ComputerName,
+        [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]$StorageHash
+    )
+
+    Write-Verbose "$ComputerName get-uptime: $(measure-command `
+        {Get-Uptime -ComputerName $ComputerName -Storagehash $StorageHash})"
+    Write-Verbose "$ComputerName perfdata: $(measure-command `
+        {Get-PerfData -ComputerName $ComputerName -StorageHash $StorageHash})"
+    Write-Verbose "$ComputerName rebootstatus: $(measure-command `
+        {Get-RebootStatus -ComputerName $ComputerName -StorageHash $StorageHash})"
+    Write-Verbose "$ComputerName Get-EventCount: $(Measure-Command `
+        {Get-EventCount -ComputerName $ComputerName -LastSystemEvent $StorageHash.$ComputerName.LastSystemEvent `
+        -LastApplicationEvent $StorageHash.$ComputerName.LastApplicationEvent})"
+    Write-Verbose "$ComputerName Get-PendingWU: $(Measure-Command `
+        {Get-PendingWU -ComputerName $ComputerName -StorageHash $StorageHash})"
+}
+
 function Get-Uptime {
 <#
 .Synopsis
@@ -16,15 +51,21 @@ Name of computer to retreive uptime from.
     Param (
         [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=0)][Alias("hostname")]$ComputerName,
         [Parameter(Mandatory=$true, ValueFromPipeline=$true, Position=1)]$StorageHash
-
     )
 
     $Error.Clear()
     #Get-CimInstance $computername takes a long time to fail if it cannot reach the target system.
     #So, invoke it on the remote computer via invoke-command with -AsJob
     #This way the job can be killed if not complete within an arbitrary amount of time. 
-    $sb = {(Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $Using:ComputerName).LastBootUpTime}             
-    $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+    $sb = {(Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $Using:ComputerName).LastBootUpTime}
+    $Session = Get-PSSession | Where ComputerName -eq $ComputerName
+    if ($Session) {
+        Write-Verbose "Session $Computername found"
+        $job = invoke-command -Session $Session -ScriptBlock $sb -AsJob 
+    } else {
+        Write-Verbose "Session $Computername not found"      
+        $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+    }
     Wait-Job $job -Timeout 10 |out-null
     Stop-Job $job 
     if ($job.State -eq "Completed") {$lastboot = Receive-Job $job} else {$lastboot = "TIMEOUT"}
@@ -75,7 +116,7 @@ Find out of computer needs a reboot. Returns $true or $false.
 
     Begin { Write-Verbose "Starting function 'Get-RebootStatus'"}
     Process {
-        $scriptblock = {
+        $sb = {
             $NeedsReboot = $false
             $CBS = (Test-Path -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending")
             $FRO = (Test-Path -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\FileRenameOperations\NeedsReboot")
@@ -87,7 +128,15 @@ Find out of computer needs a reboot. Returns $true or $false.
         try {
             #Invoke-Command can take over two minutes to fail if it cannot connect to target.
             #So I'm using -asjob to impose a 10 second timeout.
-            $job = invoke-command -ComputerName $Computername -ScriptBlock $scriptblock -ErrorAction Stop -AsJob
+            #$job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob -ErrorAction Stop
+            $Session = Get-PSSession | Where ComputerName -eq $ComputerName
+            if ($Session) {
+                Write-Verbose "Session $Computername found"
+                $job = invoke-command -Session $Session -ScriptBlock $sb -AsJob 
+            } else {
+                Write-Verbose "Session $Computername not found"      
+                $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+            }
             Wait-Job $job -Timeout 10 |out-null
             Stop-job $job
             if ($job.State -eq "Completed") { $status = Receive-Job $job } else { $status = "TIMEOUT"}
@@ -171,7 +220,14 @@ The hash we'll add data to.
             #See https://goo.gl/zybIEc for a problem I had with icm and get-perfcounter; 
             #ThomasICG's post (select-expandproperty) solved that issue
             $sb = {get-counter $Using:PerfCounters| select -ExpandProperty CounterSamples}             
-            $job = invoke-command -Computername $comp -ScriptBlock $sb -AsJob
+            $Session = Get-PSSession | Where ComputerName -eq $ComputerName
+            if ($Session) {
+                Write-Verbose "Session $Computername found"
+                $job = invoke-command -Session $Session -ScriptBlock $sb -AsJob 
+            } else {
+                Write-Verbose "Session $Computername not found"      
+                $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+            }
             Wait-Job $job -Timeout 10 |out-null
             Stop-Job $job 
             if ($job.State -eq "Completed") {$perfdata = Receive-Job $job} else {$perfdata = "TIMEOUT"}
@@ -277,8 +333,8 @@ Example of how to use this cmdlet
         #Additionally this allows a uniform way to supply credentials.
         $sb = {
             #Create a custom object containing newest timestamp in log, count of events
-            $syslog = Get-EventLog -LogName System -EntryType Error, Warning -After $Using:LastSystemEvent
-            $applog = Get-EventLog -LogName Application -EntryType Error, Warning -After $Using:LastApplicationEvent
+            $syslog = Get-EventLog -LogName System -EntryType Error, Warning -After $Using:LastSystemEvent -ErrorAction Ignore
+            $applog = Get-EventLog -LogName Application -EntryType Error, Warning -After $Using:LastApplicationEvent -ErrorAction Ignore
             $eventcount = $syslog.Count + $applog.Count
             if ($($syslog.Count) -gt 0) {$systime = $syslog[0].TimeWritten} else {$systime = $Using:LastSystemEvent}
             if ($($applog.Count) -gt 0) {$apptime = $applog[0].TimeWritten} else {$apptime = $Using:LastApplicationEvent}
@@ -288,9 +344,15 @@ Example of how to use this cmdlet
             Add-Member -InputObject $result -MemberType NoteProperty -Name EventCount -Value $eventcount
             $result
         }             
-        $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
-        #on first poll (Index=0), there may be a lot of events; use a longer timeout
-        if ($LastSystemEvent -eq 0) {$timeout = 120} else {$timeout = 120}
+        $Session = Get-PSSession | Where ComputerName -eq $ComputerName
+        if ($Session) {
+            Write-Verbose "Session $Computername found"
+            $job = invoke-command -Session $Session -ScriptBlock $sb -AsJob 
+        } else {
+            Write-Verbose "Session $Computername not found"      
+            $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+        }
+        $timeout = 120
         Wait-Job $job -Timeout $timeout |out-null
         Stop-Job $job
         if ($job.State -eq "Completed") {$result = Receive-Job $job} else {$result = "TIMEOUT"}
@@ -339,7 +401,14 @@ TBD
             $ISearchResult = $Searcher.Search($Criteria)
             $ISearchResult | select -ExpandProperty Updates
         }
-        $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+        $Session = Get-PSSession | Where ComputerName -eq $ComputerName
+        if ($Session) {
+            Write-Verbose "Session $Computername found"
+            $job = invoke-command -Session $Session -ScriptBlock $sb -AsJob 
+        } else {
+            Write-Verbose "Session $Computername not found"      
+            $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
+        }
         Wait-Job $job -Timeout 30 #|out-null
         Stop-Job $job 
         if ($job.State -eq "Completed") {$result = Receive-Job $job} else {$result = "TIMEOUT"}
@@ -438,7 +507,7 @@ Help for Param1
 <html>
   <head>
     <meta content="text/html; charset=UTF-8" http-equiv="content-type">
-    <title>Minimum Test</title>
+    <title>Test on win10-dev</title>
     <style type="text/css">
 	    body {
 		    font:  16px Courier New, monospace;
@@ -509,7 +578,8 @@ Help for Param1
               //the status cell
               
               //status ... pending reboot?
-              if (!Boolean(data[computername].PendingReboot)) {
+              var rebootstatus = data[computername].PendingReboot
+              if (!Boolean(rebootstatus)) {
                 $('#' + computername + 'status').append('<font size="2" color="LightGray">R </font>');
               } else {
                 $('#' + computername + 'status').append('<font size="2" color="Red">R </font>');
@@ -777,6 +847,7 @@ Function Get-IniContent {
 
 
 ## ---------------------------------------Script starts here---------------------------------
+#requires -version 3
 $config = Get-IniContent .\psperf.ini
 $webpage = "$($config.files.webdir)\$($config.files.pagename)"
 $jsondata = "$($config.files.webdir)\psperf.json"
@@ -794,24 +865,42 @@ if (!$StorageHash) {
 Resize-StorageHash -StorageHash $StorageHash
 
 #Get-IniContent renders comment lines as keys named Comment1, Comment2, etc. Ignore these!
-foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
-    if ($StorageHash.keys -notcontains $target) {New-ComputerRecord -ComputerName $target -StorageHash $StorageHash}
-    write-host "$target get-uptime: $(measure-command `
-        {Get-Uptime -ComputerName $target -Storagehash $StorageHash -Verbose})"
-    write-host "$target perfdata: $(measure-command `
-        {Get-PerfData -ComputerName $target -StorageHash $StorageHash})"
-    
-    if ($StorageHash.$target.UpSince) {
-        
-        write-host "$target rebootstatus: $(measure-command `
-            {Get-RebootStatus -ComputerName $target -StorageHash $StorageHash})"
-        write-host "$target Get-EventCount: $(Measure-Command `
-            {Get-EventCount -ComputerName $target -LastSystemEvent $StorageHash.$target.LastSystemEvent `
-            -LastApplicationEvent $StorageHash.$target.LastApplicationEvent })"
-        write-host "$target Get-PendingWU: $(Measure-Command `
-            {Get-PendingWU -ComputerName $target -StorageHash $StorageHash})"
+foreach ($ComputerName in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
+    if ($StorageHash.keys -notcontains $ComputerName) {New-ComputerRecord -ComputerName $ComputerName -StorageHash $StorageHash}
+    #Look for an existing PSSession to $target; create if nonexistent; error if non-possible
+    $Session = Get-PSSession | Where ComputerName -eq $ComputerName 
+    #the session may exist in some broken state. remove if so.
+    if ($Session -and ($session.Availability -ne "Available")) {Remove-PSSession $Session}
+    #try to build session with implicit creds
+    if (!$Session) {$Session = New-PSSession $ComputerName -ErrorAction Ignore}
+    if (!$Session) {
+        #Look for plaintext creds in PSPerf.ini (here represented as $config)
+        if ($config.$ComputerName.username) {
+            $username = $config.$ComputerName.username
+        } else {
+            $username = $config.defaults.username
+        }
+
+        if ($config.$ComputerName.securestring) {
+            $securestring = $config.$ComputerName.securestring
+        } else {
+            $securestring  = $config.defaults.securestring
+        }
+
+        #if plaintext creds found, try building a PSSession with those
+        if (($username -ne $null) -and ($securestring -ne $null)) {
+            $securestring = $securestring | ConvertTo-SecureString
+            $cred = New-Object System.Management.Automation.PSCredential -ArgumentList $username, $securestring
+            $Session = New-PSSession -ComputerName "$ComputerName" -Credential $cred -ErrorAction Ignore   
+        } 
     }
 
+    if ($Session) {
+        Write-Host "$ComputerName Get-Data: $(Measure-Command `
+            {Get-Data -ComputerName $ComputerName -StorageHash $StorageHash})"
+    } else {
+        Write-Warning " No session for $ComputerName"
+    }
 }
 
 if ($StorageHash.keys -notcontains "PSPerf") {
@@ -829,5 +918,5 @@ write-host "write files: $(measure-command `
 
 <# 
 while loop for testing
-$i=1; while ($i -lt 144) {write-warning "iteration $i completed in $(measure-command {.\PSPerf.ps1})"; $i++}
+$i=1; while ($i -lt 14400) {write-warning "iteration $i completed in $(measure-command {.\PSPerf.ps1})"; $i++}
 #> 
