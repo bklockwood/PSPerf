@@ -553,6 +553,17 @@ Help for Param1
           var data = ret1[0];
           var config = ret2[0];
 
+          //array of targets, sorted, filter out comments 
+          var targets = new Array();
+          for (var i in config.targets) {
+            if (i.slice(0,7) != "Comment") {
+                targets.push(i)
+            }
+          }
+          targets.sort(function (a, b) {
+            return a.toLowerCase().localeCompare(b.toLowerCase());
+          });
+
           //display time of last data refresh
           moment.locale('en');
           var now = moment();
@@ -564,129 +575,129 @@ Help for Param1
           //write the table
           $('body').append('<table id="main">');
           $('#main').append('<tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>');
-          $.each(config.targets, function(computername, val) { 
-            if (computername.slice(0,7) != "Comment") { 
-              //the servername cell
-              $('#main').append('<tr id=' + computername + '>' + computername + '</tr>');
-              $('#' + computername).prepend('<td id=' + computername +'cell>' + computername + '</td>');
-              $('#' + computername).append('<td id=' + computername + 'status>'); //status cell
-              $('#' + computername).append('<td id=' + computername + 'cpu>'); //cpu cell
-              $('#' + computername).append('<td id=' + computername + 'mem>'); //mem cell
-              $('#' + computername).append('<td id=' + computername + 'events>'); //events cell
-              $('#' + computername).append('<td id=' + computername + 'disks>'); //disks cell          
+          for (var i in targets) {
+            var computername = targets[i];
+ 
+            //the servername cell
+            $('#main').append('<tr id=' + computername + '>' + computername + '</tr>');
+            $('#' + computername).prepend('<td id=' + computername +'cell>' + computername + '</td>');
+            $('#' + computername).append('<td id=' + computername + 'status>'); //status cell
+            $('#' + computername).append('<td id=' + computername + 'cpu>'); //cpu cell
+            $('#' + computername).append('<td id=' + computername + 'mem>'); //mem cell
+            $('#' + computername).append('<td id=' + computername + 'events>'); //events cell
+            $('#' + computername).append('<td id=' + computername + 'disks>'); //disks cell          
               
-              //the status cell
+            //the status cell
               
-              //status ... pending reboot?
-              var rebootstatus = data[computername].PendingReboot
-              if (!Boolean(rebootstatus)) {
-                $('#' + computername + 'status').append('<font size="2" color="LightGray">R </font>');
-              } else {
-                $('#' + computername + 'status').append('<font size="2" color="Red">R </font>');
-              }
-              
-              //status ... windows updates outstanding (not yet installed)?
-              if (data[computername].PendingWU > 0) {
-                $('#' + computername + 'status').append('<font size="1" color="Red">WU:' +
-                  data[computername].PendingWU + '</font>');
-              } else {
-                $('#' + computername + 'status').append('<font size="1" color="LightGray">WU:' +
-                  data[computername].PendingWU + '</font>');
-              }
-              
-              //status ... uptime/downtime
-              if ("DownSince" in data[computername]) {
-                event = data[computername].DownSince;
-                udstring ='<br/><font size="1" color="red">down ';
-                $('#' + computername + 'cell').attr("style", "background-color: Black; color: Red");
-              } else {
-                event = data[computername].UpSince;
-                udstring = '<br/><font size="1" color="green">up ';
-                $('#' + computername + 'cell').attr("style", "background-color: Aquamarine; color: Black");
-              }
-              //status ... calc and display the time up or time down
-              //show timespan in days, or if <1day, hours and minutes
-              var compevent = moment(event); //time the computer went from up to down or vice versa
-              var timespan = moment(now).diff(compevent, true);
-              var dur = moment.duration(timespan); 
-              if (moment(now).diff(compevent, "days") > 1) {
-                var formatteduptime = moment(now).diff(compevent, "days") + "d";
-              } else {
-                var formatteduptime = dur.get("hours") +"h:" + dur.get("minutes") + 'm';
-              }
-              
-              $('#' + computername + 'status').append(udstring + formatteduptime + '</font>');
-                
-              //the cpu cell                
-                var cpudata = data[computername].CpuQueue;            
-                var cpuchart = $('<span>Loading</span>');
-                cpuchart.sparkline(cpudata, { type: 'line', lineColor:'red', fillColor:"MistyRose", 
-                  height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"15", 
-                  chartRangeClip: true });
-                $('#' + computername + 'cpu').append(cpuchart);
-              
-              //the memory cell (page-ins per second)                
-                var memdata = data[computername].MemQueue;            
-                var memchart = $('<span>Loading</span>');
-                memchart.sparkline(memdata, { type: 'line', lineColor:'blue', fillColor:"MistyRose", 
-                  height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"100", 
-                  chartRangeClip: true } );
-                $('#' + computername + 'mem').append(memchart);
-              
-              //the eventlog cell (errors found in system and application logs)                
-                var eventdata = data[computername].ErrWarnEvents;            
-                var eventchart = $('<span>Loading</span>');
-                eventchart.sparkline(eventdata, { type: 'line', lineColor:'purple', 
-                  fillColor:"MistyRose", height:"30", width:"100", chartRangeMin:"0",
-                  chartRangeMax:"15", chartRangeClip: true } );
-                $('#' + computername + 'events').append(eventchart);
-              
-              //the disks cell, iterate through the configured disks                
-                // check to see if per-server disks are configured
-                // !!var returns true if the variable is *not* null or undefined
-                if ((computername in config) && ("disks" in config[computername])) {
-                  disks = config[computername].disks;
-                } else {
-                  disks = config.defaults.disks
-                }
-                $.each(disks.split(','), function(arrayloc, disklabel) {
-                  //display the disk label
-                  $('#' + computername + 'disks').append(disklabel + ' ');
-                  //retreive the json array of diskfree values
-                  var diskfreevals = data[computername].DiskFree[disklabel];
-                  //only need the most recent diskfree value
-                  var diskfree = diskfreevals[diskfreevals.length - 1];
-                  //compute diskfree:diskused barchart values  
-                  if (!!diskfree) {                  
-                    var diskused = 100 - diskfree
-                    var dfarray = new Array(diskused, diskfree);
-                    //sparkline wants to see it as an array of arrays
-                    var dfchartval = new Array(dfarray);    
-                    var dfchart = $('<span>Loading</span>');
-                    //configure the sparkline barchart
-                    dfchart.sparkline(dfchartval, { type: 'bar', barWidth:10, 
-                        stackedBarColor:["DarkRed", "SeaGreen"], zeroAxis:'false', width:10, 
-                        height:"30", chartRangeMin:"0", chartRangeMax:"100"} );
-                    //append sparkline barchart to the table cell
-                    $('#' + computername + 'disks').append(dfchart);  
-                    $('#' + computername + 'disks').append(' ');
-                  }
-                  //the diskqueue chart
-                  var dqdata = data[computername].DiskQueue[disklabel];
-                  if (!!diskfree) {
-                    //$('#' + computername + 'disks').append(dqdata);
-                    var dqchart = $('<span>Loading</span>');
-                    dqchart.sparkline(dqdata, { type: 'line', lineColor:'orange', 
-                      fillColor:"MistyRose", height:"30", width:"100", chartRangeMin:"0",
-                      chartRangeMax:"10", chartRangeClip: true });
-                    $('#' + computername + 'disks').append(dqchart);
-                    $('#' + computername + 'disks').append(' ');
-                  }  
-                }); //end of $.each(disks.split..
-                $.sparkline_display_visible();              
-              
+            //status ... pending reboot?
+            var rebootstatus = data[computername].PendingReboot
+            if (!Boolean(rebootstatus)) {
+            $('#' + computername + 'status').append('<font size="2" color="LightGray">R </font>');
+            } else {
+            $('#' + computername + 'status').append('<font size="2" color="Red">R </font>');
             }
-          }); // end of $.each(config.targets, blah)
+              
+            //status ... windows updates outstanding (not yet installed)?
+            if (data[computername].PendingWU > 0) {
+            $('#' + computername + 'status').append('<font size="1" color="Red">WU:' +
+                data[computername].PendingWU + '</font>');
+            } else {
+            $('#' + computername + 'status').append('<font size="1" color="LightGray">WU:' +
+                data[computername].PendingWU + '</font>');
+            }
+              
+            //status ... uptime/downtime
+            if ("DownSince" in data[computername]) {
+            event = data[computername].DownSince;
+            udstring ='<br/><font size="1" color="red">down ';
+            $('#' + computername + 'cell').attr("style", "background-color: Black; color: Red");
+            } else {
+            event = data[computername].UpSince;
+            udstring = '<br/><font size="1" color="green">up ';
+            $('#' + computername + 'cell').attr("style", "background-color: Aquamarine; color: Black");
+            }
+            //status ... calc and display the time up or time down
+            //show timespan in days, or if <1day, hours and minutes
+            var compevent = moment(event); //time the computer went from up to down or vice versa
+            var timespan = moment(now).diff(compevent, true);
+            var dur = moment.duration(timespan); 
+            if (moment(now).diff(compevent, "days") > 1) {
+            var formatteduptime = moment(now).diff(compevent, "days") + "d";
+            } else {
+            var formatteduptime = dur.get("hours") +"h:" + dur.get("minutes") + 'm';
+            }
+              
+            $('#' + computername + 'status').append(udstring + formatteduptime + '</font>');
+                
+            //the cpu cell                
+            var cpudata = data[computername].CpuQueue;            
+            var cpuchart = $('<span>Loading</span>');
+            cpuchart.sparkline(cpudata, { type: 'line', lineColor:'red', fillColor:"MistyRose", 
+                height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"15", 
+                chartRangeClip: true });
+            $('#' + computername + 'cpu').append(cpuchart);
+              
+            //the memory cell (page-ins per second)                
+            var memdata = data[computername].MemQueue;            
+            var memchart = $('<span>Loading</span>');
+            memchart.sparkline(memdata, { type: 'line', lineColor:'blue', fillColor:"MistyRose", 
+                height:"30", width:"100", chartRangeMin:"0", chartRangeMax:"100", 
+                chartRangeClip: true } );
+            $('#' + computername + 'mem').append(memchart);
+              
+            //the eventlog cell (errors found in system and application logs)                
+            var eventdata = data[computername].ErrWarnEvents;            
+            var eventchart = $('<span>Loading</span>');
+            eventchart.sparkline(eventdata, { type: 'line', lineColor:'purple', 
+                fillColor:"MistyRose", height:"30", width:"100", chartRangeMin:"0",
+                chartRangeMax:"15", chartRangeClip: true } );
+            $('#' + computername + 'events').append(eventchart);
+              
+            //the disks cell, iterate through the configured disks                
+            // check to see if per-server disks are configured
+            // !!var returns true if the variable is *not* null or undefined
+            if ((computername in config) && ("disks" in config[computername])) {
+                disks = config[computername].disks;
+            } else {
+                disks = config.defaults.disks
+            }
+            $.each(disks.split(','), function(arrayloc, disklabel) {
+                //display the disk label
+                $('#' + computername + 'disks').append(disklabel + ' ');
+                //retreive the json array of diskfree values
+                var diskfreevals = data[computername].DiskFree[disklabel];
+                //only need the most recent diskfree value
+                var diskfree = diskfreevals[diskfreevals.length - 1];
+                //compute diskfree:diskused barchart values  
+                if (!!diskfree) {                  
+                var diskused = 100 - diskfree
+                var dfarray = new Array(diskused, diskfree);
+                //sparkline wants to see it as an array of arrays
+                var dfchartval = new Array(dfarray);    
+                var dfchart = $('<span>Loading</span>');
+                //configure the sparkline barchart
+                dfchart.sparkline(dfchartval, { type: 'bar', barWidth:10, 
+                    stackedBarColor:["DarkRed", "SeaGreen"], zeroAxis:'false', width:10, 
+                    height:"30", chartRangeMin:"0", chartRangeMax:"100"} );
+                //append sparkline barchart to the table cell
+                $('#' + computername + 'disks').append(dfchart);  
+                $('#' + computername + 'disks').append(' ');
+                }
+                //the diskqueue chart
+                var dqdata = data[computername].DiskQueue[disklabel];
+                if (!!diskfree) {
+                //$('#' + computername + 'disks').append(dqdata);
+                var dqchart = $('<span>Loading</span>');
+                dqchart.sparkline(dqdata, { type: 'line', lineColor:'orange', 
+                    fillColor:"MistyRose", height:"30", width:"100", chartRangeMin:"0",
+                    chartRangeMax:"10", chartRangeClip: true });
+                $('#' + computername + 'disks').append(dqchart);
+                $('#' + computername + 'disks').append(' ');
+                }  
+            }); //end of $.each(disks.split..
+            $.sparkline_display_visible();              
+              
+          } // end of 'for (var i in targets)'
         });
         
         setTimeout(function(){window.location.reload();}, 30000)
