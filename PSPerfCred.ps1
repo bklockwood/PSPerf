@@ -219,32 +219,6 @@ http://blogs.technet.com/b/heyscriptingguy/archive/2013/11/29/remoting-week-non-
     Set-Item -Path WSMan:\localhost\Client\TrustedHosts -Value "$Computername" -Concatenate
 }
 
-function New-Cred {
-<#
-.SYNOPSIS
-Build a PSCredential object using username 
-and plaintext securestring.
-.PARAMETER UserName
-A username, typically in one of the following forms:
-username
-domainname\username
-computername\username
-username@somedomain.com
-.PARAMETER SecureString
-A plaintext securestring, often obtained via some construct such as:
-$PlainTextSecureString = $SecureString | ConvertFrom-SecureString
-.LINK
-http://social.technet.microsoft.com/wiki/contents/articles/4546.working-with-passwords-secure-strings-and-credentials-in-windows-powershell.aspx
-#>
-    [CmdletBinding()]
-    param( 
-        [Parameter(Mandatory=$true, Position=0)]$UserName,
-        [Parameter(Mandatory=$true, Position=1)]$SecureString
-    )
-    $NewCred = New-Object System.Management.Automation.PSCredential -ArgumentList $UserName, $SecureString
-    $NewCred
-}
-
 $config = Get-IniContent .\psperf.ini
 foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
     $target
@@ -274,7 +248,7 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
             Write-Host "FOUND"
             Write-Host " Creating cred object ... " -NoNewline
             $securestring = $securestring | ConvertTo-SecureString
-            try {$cred = New-Cred -UserName $username -SecureString $securestring}
+            try {$cred = New-Object System.Management.Automation.PSCredential -ArgumentList $username, $securestring}
             catch {write-host "FAIL"}
             if ($cred) {Write-Host "SUCCESS"}
             Write-Host " Try PSRemoting to $target using configured creds ... " -NoNewline            
@@ -282,9 +256,4 @@ foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*"
             else {Write-Host "FAIL. Giving up."}            
         }
     }
-
-        
-    
-
-    
 }
