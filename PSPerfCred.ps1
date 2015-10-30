@@ -1,65 +1,4 @@
-﻿function Test-Uptime {
-<#
-.Synopsis
-Retreive uptime from computer.
-.DESCRIPTION
-   TBD
-.PARAMETER Computer
-Name of computer to retreive uptime from.
-.EXAMPLE
-   Example of how to use this cmdlet
-
-#>
-
-    [CmdletBinding()]
-    Param (
-        [Parameter(Mandatory=$true, Position=0)][Alias("hostname")]$ComputerName
-    )
-
-    $Error.Clear()
-    #Get-CimInstance $computername takes a long time to fail if it cannot reach the target system.
-    #So, invoke it on the remote computer via invoke-command with -AsJob
-    #This way the job can be killed if not complete within an arbitrary amount of time. 
-    $sb = {(Get-CimInstance -ClassName Win32_OperatingSystem -ComputerName $Using:ComputerName).LastBootUpTime}             
-    $job = invoke-command -Computername $ComputerName -ScriptBlock $sb -AsJob
-    Wait-Job $job -Timeout 10 |out-null
-    Stop-Job $job
-    Write-Verbose $job.State
-    Switch ($job.State) {
-        "Completed" {$lastboot = Receive-Job $job}
-        "Failed" {$lastboot = "JobFailed"}
-        Default {$lastboot = "JobTimeout"}
-    }
-    Remove-Job $job
-    $lastboot
-    break
-    
-    if ($error -or ($lastboot -eq "TIMEOUT")) {
-        #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:0m
-        #if computer has gone from up to down, DownSince is written and Upsince is removed 
-        write-verbose "$ComputerName is DOWN"
-         $StorageHash.$ComputerName.Remove("UpSince")
-        if (!$StorageHash.$ComputerName.DownSince) {            
-            $storagehash.$ComputerName.Add("DownSince",(Get-Date))           
-        }
-    } else {        
-        write-verbose "$ComputerName is UP"
-        $StorageHash.$ComputerName.Remove("DownSince")
-        #if computer has gone from down to up, UpSince gets written, and DownSince is removed
-        if (!$StorageHash.$ComputerName.UpSince) {            
-            $StorageHash.$ComputerName.Add("UpSince",$lastboot)
-        }
-
-        #make sure UpSince value is correct
-        if ($StorageHash.$ComputerName.UpSince -ne $lastboot) {
-            $StorageHash.$ComputerName.Set_Item("UPSince",$lastboot)
-        }
-
-    }
-
-}
-
-function Test-PsRemoting { 
+﻿function Test-PsRemoting { 
 <#
 .SYNOPSIS
 Tests whether PSRemoting to target computer is possible.
@@ -113,18 +52,18 @@ Help topic.
     if ($Details) {
     
         #Report whether we can PSRemote to localhost
-        Write-Host "Checking whether PSRemoting is enabled locally ... " -NoNewline
+        Write-Host "Checking whether PSRemoting is enabled locally ... " -NoNewline -ForegroundColor White
         $psremotingenabled = $true
         try {
             $ErrorActionPreference = "Stop"
             New-PSSession -ComputerName localhost -Name testsession | out-null
         } catch {
-            Write-Host "NOT ENABLED (bad)"
+            Write-Host "NOT ENABLED (bad)" -ForegroundColor Red
             $psremotingenabled = $false
         }    
         if ($psremotingenabled) {
             Remove-PSSession -name testsession | out-null
-            Write-Host "ENABLED (good)."
+            Write-Host "ENABLED (good)." -ForegroundColor Green 
         }
 
         #Report whether remote computer is in TrustedHosts
@@ -132,9 +71,9 @@ Help topic.
         $trustedhosts = (get-item WSMan:\localhost\Client\TrustedHosts).Value
         $trustedhosts = $trustedhosts -split(',')
         if ($trustedhosts -contains $Computername) {
-            Write-Host "FOUND (good)."
+            Write-Host -ForegroundColor Green "FOUND (good)."
         } else {
-            Write-Host "NOT FOUND (bad)."
+            Write-Host -ForegroundColor Red "NOT FOUND (bad)."
         }
 
         #Report whether remote computer is pingable
@@ -146,10 +85,10 @@ Help topic.
             $pingresult = test-connection -ComputerName $Computername -Count 1 
             $ip = $pingresult.IPV4Address.IPAddressToString
         } catch {
-            Write-Host "FAIL (bad)."
+            Write-Host -ForegroundColor Red "FAIL (bad)."
             $pingable = $false
         }        
-        if ($pingable) {Write-Host "SUCCESS (good)."}
+        if ($pingable) {Write-Host -ForegroundColor Green "SUCCESS (good)."}
     
         #Report whether WSMAN port 5985 is open
         if ($pingable) {
@@ -161,22 +100,22 @@ Help topic.
                 $socket.ReceiveTimeout = 1000      
                 $socket.BeginConnect($ip, 5985, $null, $null) | Out-Null            
             } catch {
-                Write-Host "ERROR, FAIL (bad)."
+                Write-Host -ForegroundColor Red "ERROR, FAIL (bad)."
                 Write-Host $_
             } 
             start-sleep -Milliseconds 500         
             if ($socket.Connected -eq $true) {
-                Write-Host "SUCCESS (good)."
+                Write-Host -ForegroundColor Green "SUCCESS (good)."
                 $socket.Close()
             } else {
-                Write-Host "FAIL (bad)."
+                Write-Host -ForegroundColor Red "FAIL (bad)."
             }
         } #end "if ($pingable)"
         
      } #end "if ($Details)"
 
     #Now actually try a PSRemoting connection
-    if ($Details) {Write-Host "PSRemoting to $Computername ..." -NoNewline}
+    if ($Details) {Write-Host "PSRemoting to $Computername ... " -NoNewline}
     try { 
         $ErrorActionPreference = "Stop"
         if ($Credential) {
@@ -190,12 +129,12 @@ Help topic.
     
     if ($icmresult -eq 1) {
         if (!$Details) {return $true}
-        else {Write-Host "SUCCESS (good)"}
+        else {Write-Host -ForegroundColor Green "SUCCESS (good)"}
     } else {        
         if (!$Details) {return $false}
         else {
-            Write-Host "FAIL (bad)"
-            Write-Host "$icmresult"
+            Write-Host -ForegroundColor Red "FAIL (bad)"
+            Write-Host -ForegroundColor Red "$icmresult"
         }
     }
 }
@@ -212,7 +151,12 @@ These are used to generate new lines added to PSPerf.ini
     $Computername = Read-Host -Prompt "Enter the computer name."
     if ((get-item WSMan:\localhost\Client\TrustedHosts).Value -notcontains $Computername) {
         $yesno = Get-YNAnswer -Question "$Computername is not in TrustedHosts. Add it? (Y/N)"
-        if ($yesno -eq "Y") { Add-TrustedHost $Computername }
+        if ($yesno -eq "Y") { 
+            Add-TrustedHost $Computername
+            Write-Host "$Computername was added to TrustedHosts"
+        } else {
+            Write-Host "No modification to TrustedHosts"
+        }
     }
 
     #Prompt for the username
@@ -233,6 +177,8 @@ securestring=$SecurePass
     $answer = Get-YNAnswer -Question "Is this OK? (Y/N)"
     If ($answer -eq "Y") {
         $output | out-file -FilePath .\psperf.ini -Encoding ascii -Append -Force
+    } else {
+        Write-Host "By answering 'N' you have cancelled the script."
     }
 
 }
@@ -297,28 +243,48 @@ http://social.technet.microsoft.com/wiki/contents/articles/4546.working-with-pas
     )
     $NewCred = New-Object System.Management.Automation.PSCredential -ArgumentList $UserName, $SecureString
     $NewCred
-
 }
-
 
 $config = Get-IniContent .\psperf.ini
 foreach ($target in ($config.targets.keys | where-object {$_ -notLike "Comment*" } | sort) ) {
     $target
-    if (Test-PsRemoting $target) {write-host " $target SUCCESS PSRemoting"}
+    #first we try PSRemoting with implicit creds
+    Write-Host " Try PSRemoting to $target using implicit creds ... " -NoNewline
+    if (Test-PsRemoting -Computername $target) {write-host "SUCCESS"}
     else {
-        $username = $config.$target.username
-        $securestring = $config.$target.securestring
-        if (($username -eq $null) -and ($securestring -eq $null)) {
-            Write-Host " no creds found for $target"
+        #if PSRemoting fails, we try finding creds in PSPerf.ini (which is loaded as $config)
+        Write-Host "FAIL"
+        Write-Host " Looking for configured creds ... " -NoNewline
+        if ($config.$target.username) {
+            $username = $config.$target.username
         } else {
-            $securestring = $securestring | ConvertTo-SecureString
-            try {$cred = New-Cred -UserName $username -SecureString $securestring}
-            catch {write-host " Found creds, failed to convert to a cred object (bummer) $_"}
-            if ($cred) {Write-Host " Creds found for $target (good)."}
-            if (Test-PsRemoting $target $cred) {Write-Host " $target SUCCESS PSRemoting"}
-            else {Write-Host " $target still FAILS PSRemoting"}
-            
+            $username = $config.defaults.username
         }
 
+        if ($config.$target.securestring) {
+            $securestring = $config.$target.securestring
+        } else {
+            $securestring  = $config.defaults.securestring
+        }
+
+        #if we've found creds in PSPerf.ini, try PSRemoting with those
+        if (($username -eq $null) -and ($securestring -eq $null)) {
+            Write-Host "NONE FOUND "
+        } else {
+            Write-Host "FOUND"
+            Write-Host " Creating cred object ... " -NoNewline
+            $securestring = $securestring | ConvertTo-SecureString
+            try {$cred = New-Cred -UserName $username -SecureString $securestring}
+            catch {write-host "FAIL"}
+            if ($cred) {Write-Host "SUCCESS"}
+            Write-Host " Try PSRemoting to $target using configured creds ... " -NoNewline            
+            if (Test-PsRemoting $target $cred) {Write-Host "SUCCESS"}
+            else {Write-Host "FAIL. Giving up."}            
+        }
     }
+
+        
+    
+
+    
 }

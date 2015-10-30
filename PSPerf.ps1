@@ -560,6 +560,7 @@ Help for Param1
                 targets.push(i)
             }
           }
+          //sort target array alphanumerically. thanks http://stackoverflow.com/a/9645447/2383
           targets.sort(function (a, b) {
             return a.toLowerCase().localeCompare(b.toLowerCase());
           });
