@@ -604,11 +604,17 @@ Help for Param1
                 udstring = '<br/><font size="1" color="green">up ';
                 $('#' + computername + 'cell').attr("style", "background-color: Aquamarine; color: Black");
               }
-              //status ... calc and display the timespan as (eg) 1d:2h:3m (1 day, 2 hours, 3 mins)
+              //status ... calc and display the time up or time down
+              //show timespan in days, or if <1day, hours and minutes
               var compevent = moment(event); //time the computer went from up to down or vice versa
               var timespan = moment(now).diff(compevent, true);
-              var dur = moment.duration(timespan);
-              var formatteduptime = dur.get("days") +"d:"+ dur.get("hours") +"h:" + dur.get("minutes") + 'm';
+              var dur = moment.duration(timespan); 
+              if (moment(now).diff(compevent, "days") > 1) {
+                var formatteduptime = moment(now).diff(compevent, "days") + "d";
+              } else {
+                var formatteduptime = dur.get("hours") +"h:" + dur.get("minutes") + 'm';
+              }
+              
               $('#' + computername + 'status').append(udstring + formatteduptime + '</font>');
                 
               //the cpu cell                
