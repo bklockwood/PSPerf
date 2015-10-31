@@ -72,7 +72,7 @@ Name of computer to retreive uptime from.
     Remove-Job $job
     
     if ($error -or ($lastboot -eq "TIMEOUT")) {
-        #If prior down report, calculate downtime, else write DOWN report and set downtime at 0d:0h:0m
+        #If no prior down report, write DOWN report and set downtime 
         #if computer has gone from up to down, DownSince is written and Upsince is removed 
         write-verbose "$ComputerName is DOWN"
          $StorageHash.$ComputerName.Remove("UpSince")
