@@ -622,7 +622,7 @@ Help for Param1
             var compevent = moment(event); //time the computer went from up to down or vice versa
             var timespan = moment(now).diff(compevent, true);
             var dur = moment.duration(timespan); 
-            if (moment(now).diff(compevent, "days") > 1) {
+            if (moment(now).diff(compevent, "hours") > 24) {
             var formatteduptime = moment(now).diff(compevent, "days") + "d";
             } else {
             var formatteduptime = dur.get("hours") +"h:" + dur.get("minutes") + 'm';
