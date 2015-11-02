@@ -75,7 +75,7 @@ Name of computer to retreive uptime from.
         #If no prior down report, write DOWN report and set downtime 
         #if computer has gone from up to down, DownSince is written and Upsince is removed 
         write-verbose "$ComputerName is DOWN"
-         $StorageHash.$ComputerName.Remove("UpSince")
+        $StorageHash.$ComputerName.Remove("UpSince")
         if (!$StorageHash.$ComputerName.DownSince) {            
             $storagehash.$ComputerName.Add("DownSince",(Get-Date))           
         }
@@ -918,6 +918,10 @@ foreach ($ComputerName in ($config.targets.keys | where-object {$_ -notLike "Com
             {Get-Data -ComputerName $ComputerName -StorageHash $StorageHash})"
     } else {
         Write-Warning " No session for $ComputerName"
+        $StorageHash.$ComputerName.Remove("UpSince")
+        if (!$StorageHash.$ComputerName.DownSince) {            
+            $storagehash.$ComputerName.Add("DownSince",(Get-Date))           
+        }
     }
 }
 
