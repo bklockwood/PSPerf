@@ -886,9 +886,11 @@ Function Get-IniContent {
 ## ---------------------------------------Script starts here---------------------------------
 #requires -version 3
 $config = Get-IniContent .\psperf.ini
+$jsonconfig = "$($config.files.webdir)\config.json"
+ConvertTo-Json -InputObject $config -Depth 10 | out-file $jsonconfig -Force
 $webpage = "$($config.files.webdir)\$($config.files.pagename)"
 $jsondata = "$($config.files.webdir)\psperf.json"
-$jsonconfig = "$($config.files.webdir)\config.json"
+
 if (!$StorageHash) {
     if (get-item $config.files.datafile -ErrorAction ignore) {
         $StorageHash = Import-Clixml -Path $config.files.datafile
@@ -955,7 +957,7 @@ write-host "write files: $(measure-command `
     out-file -InputObject $htmlstring -FilePath $webpage -Encoding UTF8 -Force})"
 
     ConvertTo-Json -InputObject $StorageHash -Depth 10 | out-file $jsondata -Force
-    ConvertTo-Json -InputObject $config -Depth 10 | out-file $jsonconfig -Force
+    
 
 <# 
 while loop for testing
