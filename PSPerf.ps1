@@ -513,7 +513,7 @@ Help for Param1
 		    font:  16px Courier New, monospace;
 		    line-height: 15px;
 		    padding: 2em 3em;
-        background-color: White;
+            background-color: White;
 	    }
 	    table {
 		    font: italic 18px Consolas;
@@ -521,7 +521,7 @@ Help for Param1
 		    border-width: 1px;
 		    border-color: Gainsboro;
 		    border-collapse: collapse;
-        background-color: White;
+            background-color: White;
 	    }
 	    table th {
 		    font: italic bold 18px Consolas;
@@ -529,7 +529,7 @@ Help for Param1
 		    border-width: 1px;
 		    padding: 5px;
 		    border-style: solid;
-        color: Black;
+            color: Black;
 		    border-color: Gainsboro;
 		    background-color: Gainsboro;
 	    }
@@ -540,7 +540,8 @@ Help for Param1
 		    border-style: solid;
 		    border-color: Gainsboro;
 		    background-color: White;
-        vertical-align: bottom;
+            vertical-align: bottom;
+        }
     </style>
     <script type="text/javascript" src="//cdn.jsdelivr.net/jquery/1.9.1/jquery-1.9.1.min.js"></script>
     <script type="text/javascript" src="jquery.sparkline.min.js"></script>
