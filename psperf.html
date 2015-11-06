@@ -1,0 +1,248 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+    <head>
+        <meta content="text/html; charset=UTF-8" http-equiv="content-type">
+        <title>Testmess on win10-dev</title>
+        <style type="text/css"> 
+            body {
+                font:  16px Courier New, monospace;
+                line-height: 15px;
+                padding: 2em 3em;
+                background-color: White;
+            }
+            table {
+                font: italic 18px Consolas;
+                color: Gray;
+                border-width: 1px;
+                border-color: Gainsboro;
+                border-collapse: collapse;
+                background-color: White;
+            }
+            table th {
+                font: italic bold 18px Consolas;
+                text-align: center;
+                border-width: 1px;
+                padding: 5px;
+                border-style: solid;
+                color: Black;
+                border-color: Gainsboro;
+                background-color: Gainsboro;
+            }
+            table td {
+                font: italic bold 14px Consolas;
+                border-width: 1px;
+                padding: 5px;
+                border-style: solid;
+                border-color: Gainsboro;
+                background-color: White;
+                vertical-align: bottom;
+            }
+        </style>
+        <script type="text/javascript" src="//cdn.jsdelivr.net/jquery/1.9.1/jquery-1.9.1.min.js"></script>
+        <script type="text/javascript" src="jquery.sparkline.min.js"></script>
+        <script type="text/javascript" src="//cdn.jsdelivr.net/momentjs/2.10.3/moment-with-locales.min.js"></script>
+        <script type="text/javascript">
+            moment.locale('en');
+            var targets = new Array();
+            var data = 0;
+            var config = 0;
+            var now = moment();
+            
+            $(document).ready(function(){
+                updateTable();
+                setInterval(updateTable, 30000);
+            });
+            
+            function getdata() {
+                //populate the 'data' object
+                psperfdata = $.getJSON( "psperf.json")
+                    .done(function(PSPdata) {
+                        console.log("successfully fetched psperf.json");
+                        data = PSPdata;
+                    })
+                    .fail(function() {
+                        console.log("failed to fetch psperf.json");
+                        $('#top').prepend("failed to fetch psperf.json");
+                    });
+
+                //populate 'data' object and sort array of monitored systems: 'targets'
+                jsonconfig = $.getJSON( "config.json")
+                    .done(function(PSPconfig) {
+                        console.log("successfully fetched config.json");
+                        config = PSPconfig;
+                        //array of monitoring targets, sorted
+                        for (var i in config.targets) {
+                            targets.push(i);
+                            targets.sort(function (a, b) {
+                                return a.toLowerCase().localeCompare(b.toLowerCase());
+                            });                            
+                        }                    
+                    })
+                    .fail(function() {
+                        console.log("failed to fetch config.json" )
+                        $('#top').prepend("failed to fetch config.json") 
+                    });
+            }
+            
+            function updateTable(){
+                    getdata();
+                    $.when(jsonconfig.done()).then(function(){
+                        $.when(psperfdata.done()).then(function(){
+                            var DataRefreshed = moment(data.PSPerf.LastDataWritten).format("YYYY/MM/DD hh:mm:ss");
+                            var DataAge = moment(data.PSPerf.LastDataWritten).fromNow();
+                            $('#top').empty();
+                            $('#top').append('Page Refreshed: ' + now.format('YYYY/MM/DD HH:mm:ss') + '<br/>');
+                            $('#top').append('Data Refreshed: ' + DataRefreshed + ' (' + DataAge + ')<br/>');
+                            for (i in targets) {
+                                var computername = targets[i];
+                                $('#' + computername).empty();
+                                buildrow(computername);
+                                rebootstatus(computername);
+                                wu(computername);
+                                updownstatus(computername);
+                                cpucell(computername);
+                                memcell(computername);
+                                eventcell(computername);
+                                diskcell(computername);
+                            };
+                            $.sparkline_display_visible();
+                        });
+                    });
+                }
+            
+            function buildrow(computername) {
+                //build table row for computer data display. each cell has a name.
+                var tdcomp = '<td id=' + computername
+                $('#table').append('<tr id=' + computername + '>' + computername + '</tr>');                
+                $('#' + computername).prepend(tdcomp + 'cell>' + computername + '</td>');
+                $('#' + computername).append(tdcomp + 'status></td>'); //status cell
+                $('#' + computername).append(tdcomp + 'cpu></td>'); //cpu cell
+                $('#' + computername).append(tdcomp + 'mem></td>'); //mem cell
+                $('#' + computername).append(tdcomp + 'events></td>'); //events cell
+                $('#' + computername).append(tdcomp + 'disks></td>'); //disks cell 
+            }
+            
+            function rebootstatus(computername){
+                if (!Boolean(data[computername].PendingReboot)) {
+                    $('#' + computername + 'status').append('<font size="2" color="LightGray">R </font>');
+                } else {
+                    $('#' + computername + 'status').append('<font size="2" color="Red">R </font>');
+                }
+            }
+            
+            function wu(computername){
+                var PendingWU = data[computername].PendingWU;
+                var cellname = '#' + computername + 'status'
+                if (PendingWU> 0) {
+                    $(cellname).append('<font size="1" color="Red">WU:' +PendingWU + '</font>');
+                } else {
+                    $(cellname).append('<font size="1" color="LightGray">WU:' + PendingWU + '</font>');
+                }
+            }
+            
+            function updownstatus(computername) {
+                if ("DownSince" in data[computername]) {
+                    event = data[computername].DownSince;
+                    udstring ='<br/><font size="1" color="red">down ';
+                    $('#' + computername + 'cell').attr("style", "background-color: Black; color: Red");
+                } else {
+                    event = data[computername].UpSince;
+                    udstring = '<br/><font size="1" color="green">up ';
+                    $('#' + computername + 'cell').attr("style", "background-color: Aquamarine; color: Black");
+                }
+              //status ... calc and display the timespan as (eg) 1d:2h:3m (1 day, 2 hours, 3 mins)
+                var compevent = moment(event); //time the computer went from up to down or vice versa
+                var timespan = moment(now).diff(compevent, true);
+                var dur = moment.duration(timespan);
+                var formatteduptime = dur.get("days") +"d:"+ dur.get("hours") +"h:" + dur.get("minutes") + 'm';
+                $('#' + computername + 'status').append(udstring + formatteduptime + '</font>');
+            }
+            
+            function cpucell(computername) {
+                var cpudata = data[computername].CpuQueue;
+                var cpuchart = $('<span>Loading</span>');
+                cpuchart.sparkline(cpudata, { 
+                    type: 'line', lineColor:'red', fillColor:"MistyRose", height:"30", width:"100",
+                    chartRangeMin:"0", chartRangeMax:"15", chartRangeClip: true 
+                });
+                $('#' + computername + 'cpu').append (cpuchart);
+            }
+            
+            function memcell(computername) {
+                var memdata = data[computername].MemQueue;
+                var memchart = $('<span>Loading</span>');
+                memchart.sparkline(memdata, { 
+                    type: 'line', lineColor:'blue', fillColor:"MistyRose", height:"30", width:"100",
+                    chartRangeMin:"0", chartRangeMax:"100", chartRangeClip: true 
+                });
+                $('#' + computername + 'mem').append(memchart);                
+            }
+            
+            function eventcell(computername) {
+                var eventdata = data[computername].ErrWarnEvents;            
+                var eventchart = $('<span>Loading</span>');
+                eventchart.sparkline(eventdata, { 
+                    type: 'line', lineColor:'purple', fillColor:"MistyRose", height:"30", width:"100",
+                    chartRangeMin:"0", chartRangeMax:"15", chartRangeClip: true 
+                } );
+                $('#' + computername + 'events').append(eventchart);
+            }
+            
+            function diskcell(computername) {
+                var disks = 0;
+                if ((computername in config) && ("disks" in config[computername])) {
+                  disks = config[computername].disks;
+                } else {
+                  disks = config.defaults.disks
+                }
+                diskarray = disks.split(",")
+                for (i in diskarray) {
+                    disk = diskarray[i]
+                    $('#' + computername + 'disks').append(disk + " ");
+                    diskfree(computername, disk);
+                    diskqueues(computername, disk);
+                }
+            }
+            
+            function diskfree(computername, disk) {
+                //retreive the json array of diskfree values
+                var diskfreevals = data[computername].DiskFree[disk];
+                //only need the most recent diskfree value
+                var diskfree = diskfreevals[diskfreevals.length - 1];
+                if (!!diskfree) {                  
+                    var diskused = 100 - diskfree
+                    var dfarray = new Array(diskused, diskfree);
+                    //sparkline wants to see it as an array of arrays
+                    var dfchartval = new Array(dfarray);    
+                    var dfchart = $('<span>Loading</span>');
+                    dfchart.sparkline(dfchartval, { 
+                        type: 'bar', barWidth:10, stackedBarColor:["DarkRed", "SeaGreen"], zeroAxis:'false',
+                        width:10, height:"30", chartRangeMin:"0", chartRangeMax:"100"
+                    });
+                    $('#' + computername + 'disks').append(dfchart);  
+                    $('#' + computername + 'disks').append(' ');
+                }
+            }
+            
+            function diskqueues(computername, disk) {
+                var dqdata = data[computername].DiskQueue[disk];
+
+                    var dqchart = $('<span>Loading</span>');
+                    dqchart.sparkline(dqdata, { type: 'line', lineColor:'orange', 
+                      fillColor:"MistyRose", height:"30", width:"100", chartRangeMin:"0",
+                      chartRangeMax:"10", chartRangeClip: true });
+                    $('#' + computername + 'disks').append(dqchart);
+                    $('#' + computername + 'disks').append(' ');
+            }
+        </script>
+    </head>
+    <body>
+        <div id="top"></div>
+        <table id="table">
+            <tr><th></th><th>status</th><th>cpu</th><th>mem</th><th>events</th><th>disks</th></tr>
+        </table>
+        <div id="bottom"></div>
+        <div id="chicken"><img src="http://images.lingscars.com/images/header/webcams/chicken-ani.gif"></div>
+    </body>
+</html>
+
