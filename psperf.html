@@ -46,7 +46,7 @@
             var targets = new Array();
             var data = 0;
             var config = 0;
-            var now = moment();
+            
             
             $(document).ready(function(){
                 updateTable();
@@ -55,6 +55,7 @@
             
             function getdata() {
                 //populate the 'data' object
+                data = 0;
                 psperfdata = $.getJSON( "psperf.json")
                     .done(function(PSPdata) {
                         console.log("successfully fetched psperf.json");
@@ -62,10 +63,12 @@
                     })
                     .fail(function() {
                         console.log("failed to fetch psperf.json");
-                        $('#top').prepend("failed to fetch psperf.json");
+                        $('#top').empty();
+                        $('#top').prepend("failed to fetch psperf.json<br/>");
                     });
 
                 //populate 'data' object and sort array of monitored systems: 'targets'
+                config = 0;
                 jsonconfig = $.getJSON( "config.json")
                     .done(function(PSPconfig) {
                         console.log("successfully fetched config.json");
@@ -79,36 +82,38 @@
                         }                    
                     })
                     .fail(function() {
-                        console.log("failed to fetch config.json" )
-                        $('#top').prepend("failed to fetch config.json") 
+                        console.log("failed to fetch config.json" );
+                        $('#top').empty();
+                        $('#top').prepend("failed to fetch config.json<br>");
                     });
             }
             
             function updateTable(){
-                    getdata();
-                    $.when(jsonconfig.done()).then(function(){
-                        $.when(psperfdata.done()).then(function(){
-                            var DataRefreshed = moment(data.PSPerf.LastDataWritten).format("YYYY/MM/DD hh:mm:ss");
-                            var DataAge = moment(data.PSPerf.LastDataWritten).fromNow();
-                            $('#top').empty();
-                            $('#top').append('Page Refreshed: ' + now.format('YYYY/MM/DD HH:mm:ss') + '<br/>');
-                            $('#top').append('Data Refreshed: ' + DataRefreshed + ' (' + DataAge + ')<br/>');
-                            for (i in targets) {
-                                var computername = targets[i];
-                                $('#' + computername).empty();
-                                buildrow(computername);
-                                rebootstatus(computername);
-                                wu(computername);
-                                updownstatus(computername);
-                                cpucell(computername);
-                                memcell(computername);
-                                eventcell(computername);
-                                diskcell(computername);
-                            };
-                            $.sparkline_display_visible();
-                        });
+                var now = moment();
+                getdata();
+                $.when(jsonconfig.done()).then(function(){
+                    $.when(psperfdata.done()).then(function(){
+                        var DataRefreshed = moment(data.PSPerf.LastDataWritten).format("YYYY/MM/DD hh:mm:ss");
+                        var DataAge = moment(data.PSPerf.LastDataWritten).fromNow();
+                        $('#top').empty();
+                        $('#top').append('Page Refreshed: ' + now.format('YYYY/MM/DD HH:mm:ss') + '<br/>');
+                        $('#top').append('Data Refreshed: ' + DataRefreshed + ' (' + DataAge + ')<br/>');
+                        for (i in targets) {
+                            var computername = targets[i];
+                            $('#' + computername).empty();
+                            buildrow(computername);
+                            rebootstatus(computername);
+                            wu(computername);
+                            updownstatus(computername);
+                            cpucell(computername);
+                            memcell(computername);
+                            eventcell(computername);
+                            diskcell(computername);
+                        };
+                        $.sparkline_display_visible();
                     });
-                }
+                });
+            }
             
             function buildrow(computername) {
                 //build table row for computer data display. each cell has a name.
